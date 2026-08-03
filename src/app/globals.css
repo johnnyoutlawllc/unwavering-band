@@ -1,0 +1,354 @@
+:root {
+  --ink: #03030a;
+  --ink-soft: #0a0a14;
+  --light: #f4f1ea;
+  --dim: rgba(244, 241, 234, 0.56);
+  --dimmer: rgba(244, 241, 234, 0.32);
+  --hair: rgba(244, 241, 234, 0.12);
+
+  --band-1: #6ee7ff;
+  --band-2: #a78bfa;
+  --band-3: #ffb347;
+  --band-4: #ff6b8b;
+  --band-5: #7dffb0;
+
+  --measure: 34rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--ink);
+  color: var(--light);
+}
+
+body {
+  font-family: var(--font-body), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+/* ---------- the field of light ---------- */
+
+.field {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 50% 110%, rgba(167, 139, 250, 0.16), transparent 60%),
+    radial-gradient(90% 60% at 50% -10%, rgba(110, 231, 255, 0.12), transparent 60%),
+    var(--ink);
+}
+
+/*
+ * Each band is a single vertical stripe of light: bright at the waist, fading
+ * out top and bottom, blurred wide enough that the edges never resolve. They
+ * drift, they do not blink. The whole idea is that they do not waver.
+ */
+.band {
+  position: absolute;
+  top: -10%;
+  height: 120%;
+  width: var(--w, 2px);
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--c) 26%,
+    var(--c) 74%,
+    transparent 100%
+  );
+  filter: blur(var(--blur, 6px));
+  opacity: var(--o, 0.5);
+  mix-blend-mode: screen;
+  animation: drift var(--dur, 26s) ease-in-out infinite alternate;
+  animation-delay: var(--delay, 0s);
+  will-change: transform;
+}
+
+@keyframes drift {
+  from {
+    transform: translateX(-1.6vw) scaleY(0.96);
+  }
+  to {
+    transform: translateX(1.6vw) scaleY(1.04);
+  }
+}
+
+.grain {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .band {
+    animation: none;
+  }
+}
+
+/* ---------- layout ---------- */
+
+main {
+  position: relative;
+  z-index: 2;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 6rem 1.5rem 4rem;
+  gap: 2.75rem;
+}
+
+.stack {
+  width: 100%;
+  max-width: var(--measure);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.center {
+  text-align: center;
+  align-items: center;
+}
+
+/* ---------- type ---------- */
+
+.wordmark {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 300;
+  font-size: clamp(2.6rem, 9vw, 4.6rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  margin: 0;
+  color: var(--light);
+  text-shadow: 0 0 44px rgba(167, 139, 250, 0.4), 0 0 14px rgba(110, 231, 255, 0.25);
+}
+
+.wordmark .dot {
+  color: var(--dimmer);
+}
+
+.eyebrow {
+  font-size: 0.72rem;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+  margin: 0;
+}
+
+.lede {
+  font-size: 1.06rem;
+  color: var(--dim);
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.lede strong {
+  color: var(--light);
+  font-weight: 400;
+}
+
+.fine {
+  font-size: 0.8rem;
+  color: var(--dimmer);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.rule {
+  height: 1px;
+  width: 100%;
+  background: linear-gradient(to right, transparent, var(--hair), transparent);
+  border: 0;
+  margin: 0;
+}
+
+/* ---------- panel ---------- */
+
+.panel {
+  width: 100%;
+  max-width: var(--measure);
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  background: linear-gradient(
+    to bottom,
+    rgba(244, 241, 234, 0.045),
+    rgba(244, 241, 234, 0.015)
+  );
+  backdrop-filter: blur(14px);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.who img {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid var(--hair);
+}
+
+.who .name {
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.who .mail {
+  font-size: 0.78rem;
+  color: var(--dimmer);
+  margin: 0;
+}
+
+/* ---------- controls ---------- */
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 0.8rem 1.3rem;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 241, 234, 0.22);
+  background: rgba(244, 241, 234, 0.06);
+  color: var(--light);
+  font-size: 0.92rem;
+  letter-spacing: 0.01em;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: rgba(244, 241, 234, 0.12);
+  border-color: rgba(244, 241, 234, 0.4);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn-primary {
+  background: var(--light);
+  color: var(--ink);
+  border-color: transparent;
+  font-weight: 500;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #fff;
+  border-color: transparent;
+}
+
+.btn-quiet {
+  border: 0;
+  background: none;
+  color: var(--dimmer);
+  padding: 0;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.btn-quiet:hover:not(:disabled) {
+  color: var(--dim);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.toggle-label {
+  font-size: 0.92rem;
+  margin: 0;
+}
+
+.note {
+  font-size: 0.8rem;
+  color: var(--dimmer);
+  margin: 0;
+}
+
+.status {
+  font-size: 0.82rem;
+  color: var(--dim);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.pip {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--band-5);
+  box-shadow: 0 0 10px var(--band-5);
+  flex: none;
+}
+
+.pip.off {
+  background: var(--dimmer);
+  box-shadow: none;
+}
+
+.error {
+  font-size: 0.82rem;
+  color: #ff9aa8;
+  margin: 0;
+}
+
+/* ---------- footer ---------- */
+
+footer {
+  position: relative;
+  z-index: 2;
+  padding: 0 1.5rem 3rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--dimmer);
+  line-height: 1.7;
+}
+
+footer a {
+  color: var(--dim);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hair);
+}
+
+footer a:hover {
+  color: var(--light);
+}

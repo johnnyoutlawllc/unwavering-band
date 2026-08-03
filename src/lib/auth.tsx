@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import type { User } from '@supabase/supabase-js';
@@ -15,9 +16,16 @@ import { supabase, type UnwaveringUser } from './supabase';
  * Google is the only way in. There is no password to forget and no profile to
  * fill out, because the whole point of the thing is that being here is enough.
  *
- * The row in `unwavering.users` is created by a trigger on auth.users, so this
- * provider only ever reads it back and updates it. If the read comes up empty
- * (a user who signed in before the trigger existed) we insert it ourselves.
+ * The row in `unwavering.users` is normally created by a trigger on auth.users.
+ * The trigger only fires on INSERT, though, so anyone who already had an
+ * account on this Supabase project before this site existed arrives with no
+ * row and has to be backfilled here.
+ *
+ * That backfill has to be an upsert, not an insert, and it has to be
+ * single flight. Supabase fires getSession() and onAuthStateChange() at
+ * roughly the same moment on a fresh sign in, so two loads race, both see no
+ * row, and both try to create one. The loser used to surface a raw
+ * "duplicate key value violates unique constraint" at the user.
  */
 
 type Ctx = {
@@ -54,11 +62,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadProfile = useCallback(async (u: User | null) => {
-    if (!u) {
-      setProfile(null);
-      return;
-    }
+  // One profile load at a time per user, so the two callers cannot race.
+  const inFlight = useRef<Map<string, Promise<void>>>(new Map());
+
+  const runLoad = useCallback(async (u: User) => {
     const { data, error: err } = await supabase
       .from('users')
       .select('*')
@@ -71,28 +78,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     if (data) {
       setProfile(data as UnwaveringUser);
+      setError(null);
       return;
     }
 
-    // Trigger did not fire for this account. Make the row ourselves.
+    // No row. Either the trigger has not landed yet or this account predates
+    // it. Upsert rather than insert: if the other caller got there first we
+    // want the existing row back, not a primary key violation.
     const meta = u.user_metadata ?? {};
-    const { data: created, error: insertErr } = await supabase
+    const { data: row, error: upsertErr } = await supabase
       .from('users')
-      .insert({
-        id: u.id,
-        email: u.email ?? null,
-        display_name:
-          (typeof meta.full_name === 'string' && meta.full_name) ||
-          (typeof meta.name === 'string' && meta.name) ||
-          (u.email?.split('@')[0] ?? null),
-        avatar_url: typeof meta.avatar_url === 'string' ? meta.avatar_url : null,
-      })
+      .upsert(
+        {
+          id: u.id,
+          email: u.email ?? null,
+          display_name:
+            (typeof meta.full_name === 'string' && meta.full_name) ||
+            (typeof meta.name === 'string' && meta.name) ||
+            (u.email?.split('@')[0] ?? null),
+          avatar_url: typeof meta.avatar_url === 'string' ? meta.avatar_url : null,
+        },
+        { onConflict: 'id' },
+      )
       .select()
       .single();
 
-    if (insertErr) setError(insertErr.message);
-    else setProfile(created as UnwaveringUser);
+    if (!upsertErr) {
+      setProfile(row as UnwaveringUser);
+      setError(null);
+      return;
+    }
+
+    // Belt and braces. If the upsert still lost somehow, the row exists now,
+    // so read it back instead of shouting Postgres at somebody.
+    const { data: reread } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', u.id)
+      .maybeSingle();
+
+    if (reread) {
+      setProfile(reread as UnwaveringUser);
+      setError(null);
+    } else {
+      setError(upsertErr.message);
+    }
   }, []);
+
+  const loadProfile = useCallback(
+    async (u: User | null) => {
+      if (!u) {
+        setProfile(null);
+        return;
+      }
+      const existing = inFlight.current.get(u.id);
+      if (existing) return existing;
+
+      const p = runLoad(u).finally(() => {
+        inFlight.current.delete(u.id);
+      });
+      inFlight.current.set(u.id, p);
+      return p;
+    },
+    [runLoad],
+  );
 
   useEffect(() => {
     let cancelled = false;

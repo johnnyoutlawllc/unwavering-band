@@ -8,6 +8,8 @@ export default function Home() {
 
       <main>
         <div className="stack center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="mark" src="/logo.svg" alt="" width={64} height={64} />
           <p className="eyebrow">Est. 2026</p>
           <h1 className="wordmark">
             unwavering<span className="dot">.band</span>

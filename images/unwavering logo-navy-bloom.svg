@@ -1,0 +1,31 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="unwavering.band">
+  <defs>
+    <linearGradient id="nb-field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#173A5E"/>
+      <stop offset="100%" stop-color="#0B1E36"/>
+    </linearGradient>
+    <linearGradient id="nb-fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="70%" stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="nb-mask">
+      <rect x="30" y="0" width="40" height="100" fill="url(#nb-fade)"/>
+    </mask>
+    <filter id="nb-blur" x="-100%" y="-50%" width="300%" height="200%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <clipPath id="nb-clip">
+      <rect width="100" height="100" rx="20"/>
+    </clipPath>
+  </defs>
+  <rect width="100" height="100" rx="20" fill="url(#nb-field)"/>
+  <g clip-path="url(#nb-clip)">
+    <g mask="url(#nb-mask)">
+      <rect x="44" y="0" width="12" height="100" fill="#FF6B35" opacity="0.9" filter="url(#nb-blur)"/>
+      <rect x="47" y="0" width="6" height="100" fill="#FF8A3D"/>
+      <rect x="48.6" y="0" width="2.8" height="100" fill="#FFE0B8"/>
+    </g>
+  </g>
+</svg>

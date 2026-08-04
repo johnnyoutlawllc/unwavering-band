@@ -1,0 +1,17 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="unwavering.band">
+  <defs>
+    <linearGradient id="held-band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FF6B35" stop-opacity="0"/>
+      <stop offset="24%" stop-color="#FF8A3D" stop-opacity="1"/>
+      <stop offset="50%" stop-color="#FFB25C" stop-opacity="1"/>
+      <stop offset="76%" stop-color="#FF8A3D" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#FF6B35" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="held-field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#48793F"/>
+      <stop offset="100%" stop-color="#335B31"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" rx="20" fill="url(#held-field)"/>
+  <rect x="46" y="0" width="8" height="100" fill="url(#held-band)"/>
+</svg>

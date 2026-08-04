@@ -1,0 +1,26 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="unwavering.band">
+  <defs>
+    <linearGradient id="co-field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#487A3E"/>
+      <stop offset="100%" stop-color="#2F5730"/>
+    </linearGradient>
+    <linearGradient id="co-fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="28%" stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="72%" stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="co-mask">
+      <rect x="0" y="0" width="100" height="100" fill="url(#co-fade)"/>
+    </mask>
+  </defs>
+  <rect width="100" height="100" rx="20" fill="url(#co-field)"/>
+  <g mask="url(#co-mask)">
+    <rect x="23" y="0" width="2" height="100" fill="#EAF3E4" opacity="0.2"/>
+    <rect x="34" y="0" width="2" height="100" fill="#EAF3E4" opacity="0.32"/>
+    <rect x="47" y="0" width="7" height="100" fill="#FF8A3D"/>
+    <rect x="49.4" y="0" width="2.2" height="100" fill="#FFD9A8"/>
+    <rect x="65" y="0" width="2" height="100" fill="#EAF3E4" opacity="0.32"/>
+    <rect x="76" y="0" width="2" height="100" fill="#EAF3E4" opacity="0.2"/>
+  </g>
+</svg>

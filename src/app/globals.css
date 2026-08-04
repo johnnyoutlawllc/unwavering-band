@@ -128,6 +128,14 @@ main {
 
 /* ---------- type ---------- */
 
+.mark {
+  width: 64px;
+  height: 64px;
+  border-radius: 13px;
+  display: block;
+  filter: drop-shadow(0 0 30px rgba(255, 107, 53, 0.28));
+}
+
 .wordmark {
   font-family: var(--font-display), Georgia, serif;
   font-weight: 300;

@@ -1,52 +1,119 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
 import { Field } from '@/components/Field';
-import { Panel } from '@/components/Panel';
+import { Bandscape } from '@/components/Bandscape';
+import { UserMenu } from '@/components/UserMenu';
+import { SettingsModal } from '@/components/SettingsModal';
+import { useAuth } from '@/lib/auth';
+import { supabase, type UnwaveringUser } from '@/lib/supabase';
+import { getPosition, type Reading } from '@/lib/geo';
 
 export default function Home() {
-  return (
-    <>
-      <Field />
+  const { user, profile, loading, error, signInWithGoogle, setProfile } =
+    useAuth();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-      <main>
-        <div className="stack center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="mark" src="/logo.svg" alt="" width={64} height={64} />
-          <p className="eyebrow">Est. 2026</p>
+  /*
+   * Every signed in page visit gets logged once: location, date and time.
+   * If the person turned sharing off, or the browser will not say where they
+   * are, the visit is logged with no coordinates. The withdrawal of consent
+   * is respected: an explicit opt out means we do not even ask the browser.
+   */
+  const loggedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!user || !profile || loggedFor.current === user.id) return;
+    loggedFor.current = user.id;
+
+    (async () => {
+      const optedOut =
+        !profile.location_sharing && profile.location_opted_out_at !== null;
+
+      let reading: Reading | null = null;
+      if (!optedOut) {
+        try {
+          const pos = await getPosition();
+          reading = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy_m: pos.coords.accuracy,
+          };
+        } catch {
+          // They said no, or the browser could not find them. Still a visit.
+        }
+      }
+
+      await supabase.from('visits').insert({
+        user_id: user.id,
+        lat: reading?.lat ?? null,
+        lng: reading?.lng ?? null,
+        accuracy_m: reading?.accuracy_m ?? null,
+      });
+
+      if (reading) {
+        const { data } = await supabase
+          .from('users')
+          .update({
+            location_sharing: true,
+            location_opted_in_at:
+              profile.location_opted_in_at ?? new Date().toISOString(),
+            location_opted_out_at: null,
+            last_lat: reading.lat,
+            last_lng: reading.lng,
+            last_location_accuracy_m: reading.accuracy_m,
+            last_location_at: new Date().toISOString(),
+          })
+          .eq('id', user.id)
+          .select()
+          .single();
+        if (data) setProfile(data as UnwaveringUser);
+      }
+    })();
+  }, [user, profile, setProfile]);
+
+  if (loading) {
+    return (
+      <>
+        <Field />
+        <main className="hero">
           <h1 className="wordmark">
             unwavering<span className="dot">.band</span>
           </h1>
-          <p className="lede">
-            Kurt Vonnegut once had a narrator strip everything off a person
-            except the one thing that was actually them, and what was left was
-            <strong> a narrow band of light</strong>, running head to foot,
-            steady, refusing to flicker. No face, no story, no job. Just the
-            light, and the fact that it held.
-          </p>
-        </div>
+        </main>
+      </>
+    );
+  }
 
-        <div className="stack center">
-          <hr className="rule" />
-          <p className="fine">
-            This is the beginning of something built on that picture. Everybody
-            who signs in becomes one band. Say where you are and your band gets
-            a place to stand. That is the whole idea, and right now it is only
-            an idea, so what you are joining is a list, not a product.
-          </p>
-        </div>
+  if (!user) {
+    return (
+      <>
+        <Field />
+        <main className="hero">
+          <h1 className="wordmark">
+            unwavering<span className="dot">.band</span>
+          </h1>
+          <button className="btn btn-primary" onClick={signInWithGoogle}>
+            Sign in and Share Your Location to begin
+          </button>
+          {error ? <p className="error">{error}</p> : null}
+        </main>
+      </>
+    );
+  }
 
-        <Panel />
-      </main>
-
-      <footer>
-        <p>
-          unwavering.band &middot; a{' '}
-          <a href="https://dataday.studio">dataday.studio</a> project &middot;
-          Rockwall, TX
-        </p>
-        <p>
-          Location is opt in, one reading at a time, and deleted the moment you
-          turn it off.
-        </p>
-      </footer>
+  return (
+    <>
+      <Field />
+      <Bandscape />
+      <header className="topbar">
+        <UserMenu onSettings={() => setSettingsOpen(true)} />
+      </header>
+      <div className="wordmark-top">
+        <h1 className="wordmark small">
+          unwavering<span className="dot">.band</span>
+        </h1>
+      </div>
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
   );
 }

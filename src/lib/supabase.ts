@@ -28,6 +28,7 @@ export type UnwaveringUser = {
   email: string | null;
   display_name: string | null;
   avatar_url: string | null;
+  band_color: string | null;
   location_sharing: boolean;
   location_opted_in_at: string | null;
   location_opted_out_at: string | null;

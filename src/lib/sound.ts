@@ -23,6 +23,10 @@ export class Drone {
   private whaleGain: GainNode | null = null;
   private whaleTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // 0..1 from the volume slider, on top of the built in level.
+  private baseVolume = 1;
+  private static readonly LEVEL = 0.24;
+
   get running(): boolean {
     return this.ctx !== null;
   }
@@ -119,7 +123,7 @@ export class Drone {
     echoLevel.connect(echo);
     echoLevel.connect(brightness);
 
-    master.gain.setTargetAtTime(0.2, ctx.currentTime, 1.2);
+    master.gain.setTargetAtTime(Drone.LEVEL * this.baseVolume, ctx.currentTime, 1.2);
 
     this.ctx = ctx;
     this.master = master;
@@ -157,6 +161,17 @@ export class Drone {
     gain.gain.cancelScheduledValues(t);
     gain.gain.setTargetAtTime(0.11, t, dur * 0.28);
     gain.gain.setTargetAtTime(0, t + dur * 0.55, dur * 0.32);
+  }
+
+  /** v is the slider, 0..1. Glides like everything else. */
+  setVolume(v: number) {
+    this.baseVolume = Math.max(0, Math.min(1, v));
+    if (!this.ctx || !this.master) return;
+    this.master.gain.setTargetAtTime(
+      Drone.LEVEL * this.baseVolume,
+      this.ctx.currentTime,
+      0.15,
+    );
   }
 
   /** p is 0 far from any band, 1 right on one. */

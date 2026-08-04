@@ -24,6 +24,17 @@ export function getPosition(): Promise<GeolocationPosition> {
   });
 }
 
+/*
+ * The tooltip never says where anyone is, only how far apart you are. That
+ * is the whole grammar of the site: distance, not address.
+ */
+export function distanceLabel(km: number): string {
+  const miles = km * 0.621371;
+  if (miles < 1) return 'less than a mile apart';
+  if (miles < 10) return `${miles.toFixed(1)} miles apart`;
+  return `${Math.round(miles).toLocaleString('en-US')} miles apart`;
+}
+
 /** Great circle distance in kilometres. */
 export function haversineKm(
   aLat: number,

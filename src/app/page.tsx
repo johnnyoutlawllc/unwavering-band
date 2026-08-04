@@ -105,7 +105,7 @@ export default function Home() {
     <>
       <Field />
       <Bandscape />
-      <header className="topbar">
+      <header className="profilebar">
         <UserMenu onSettings={() => setSettingsOpen(true)} />
       </header>
       <div className="wordmark-top">

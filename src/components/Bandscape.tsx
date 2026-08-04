@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { haversineKm } from '@/lib/geo';
+import { distanceLabel, haversineKm } from '@/lib/geo';
 import { Drone } from '@/lib/sound';
 import { DEFAULT_BAND_COLOR } from './SettingsModal';
 
@@ -36,6 +36,7 @@ type DrawnBand = {
   scale: number; // eased current size
   color: string | null;
   phase: number;
+  label: string; // what the tooltip says on hover
 };
 
 type Spark = {
@@ -83,8 +84,10 @@ export function Bandscape() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [others, setOthers] = useState<OtherBand[]>([]);
   const [soundOn, setSoundOn] = useState(false);
+  const [volume, setVolume] = useState(1);
 
   const droneRef = useRef<Drone | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
   const mouseRef = useRef<{ x: number; y: number; inside: boolean }>({
     x: -1,
     y: -1,
@@ -145,25 +148,37 @@ export function Bandscape() {
       frac: number;
       scale: number;
       color: string | null;
-    }> = [{ key: 'self', frac: 0, scale: 1, color: myColor }];
+      label: string;
+    }> = [
+      {
+        key: 'self',
+        frac: 0,
+        scale: 1,
+        color: myColor,
+        label: displayName ?? 'You',
+      },
+    ];
     let unknown = 0;
     for (const o of others) {
       let frac: number;
       let scale: number;
+      let label: string;
       if (myLat !== null && myLng !== null && o.lat !== null && o.lng !== null) {
         const km = haversineKm(myLat, myLng, o.lat, o.lng);
         const dir = o.lng >= myLng ? 1 : -1;
         frac = dir * kmToFrac(km);
         scale = kmToScale(km);
+        label = `${o.name} · ${distanceLabel(km)}`;
       } else {
         // No fix on one side or the other: stand them at a calm default,
         // alternating sides so the picture stays balanced.
         const side = unknown % 2 === 0 ? 1 : -1;
         frac = side * (0.16 + 0.07 * Math.floor(unknown / 2));
         scale = 0.5;
+        label = o.name;
         unknown++;
       }
-      placed.push({ key: o.key, frac, scale, color: o.color });
+      placed.push({ key: o.key, frac, scale, color: o.color, label });
     }
 
     // Keep neighbours from standing inside each other.
@@ -175,13 +190,16 @@ export function Bandscape() {
     }
     for (const p of placed) p.frac = Math.max(-0.46, Math.min(0.46, p.frac));
     return placed;
-  }, [others, myLat, myLng, myColor]);
+  }, [others, myLat, myLng, myColor, displayName]);
 
   /* ---------- sound ---------- */
+
+  const volumeRef = useRef(volume);
 
   useEffect(() => {
     if (soundOn) {
       const d = new Drone();
+      d.setVolume(volumeRef.current);
       d.start();
       droneRef.current = d;
       return () => {
@@ -190,6 +208,12 @@ export function Bandscape() {
       };
     }
   }, [soundOn]);
+
+  // The slider adjusts the running drone without restarting it.
+  useEffect(() => {
+    volumeRef.current = volume;
+    droneRef.current?.setVolume(volume);
+  }, [volume]);
 
   /* ---------- the canvas ---------- */
 
@@ -205,6 +229,7 @@ export function Bandscape() {
       scale: prev.get(t.key)?.scale ?? t.scale,
       color: t.color,
       phase: hashPhase(t.key),
+      label: t.label,
     }));
   }, [targets]);
 
@@ -357,7 +382,7 @@ export function Bandscape() {
         }
       }
 
-      return near;
+      return { near, x: bx };
     }
 
     function drawSparks(dt: number) {
@@ -394,16 +419,38 @@ export function Bandscape() {
       ctx!.globalCompositeOperation = 'lighter';
 
       let maxNear = 0;
+      let tipLabel: string | null = null;
+      let tipX = 0;
       for (const b of bandsRef.current) {
         // Ease each band toward where it belongs, so joins and moves glide.
         b.frac += (b.targetFrac - b.frac) * Math.min(1, dt * 2.2);
         b.scale += (b.targetScale - b.scale) * Math.min(1, dt * 2.2);
-        maxNear = Math.max(maxNear, drawBand(b, t, dt));
+        const res = drawBand(b, t, dt);
+        if (res.near > maxNear) {
+          maxNear = res.near;
+          tipLabel = b.label;
+          tipX = res.x;
+        }
       }
       drawSparks(dt);
 
       ctx!.globalCompositeOperation = 'source-over';
       droneRef.current?.setProximity(maxNear);
+
+      // The tooltip rides the band, named at the right zoom for the viewer.
+      const tip = tipRef.current;
+      if (tip) {
+        const mouse = mouseRef.current;
+        if (mouse.inside && tipLabel && maxNear > 0.45) {
+          if (tip.textContent !== tipLabel) tip.textContent = tipLabel;
+          tip.style.transform = `translate(${Math.round(tipX)}px, ${Math.round(
+            mouse.y - 46,
+          )}px) translateX(-50%)`;
+          tip.style.opacity = '1';
+        } else {
+          tip.style.opacity = '0';
+        }
+      }
 
       raf = requestAnimationFrame(frame);
     }
@@ -420,12 +467,26 @@ export function Bandscape() {
   return (
     <>
       <canvas ref={canvasRef} className="bandscape" aria-hidden="true" />
-      <button
-        className="sound-toggle"
-        onClick={() => setSoundOn((v) => !v)}
-        aria-pressed={soundOn}
-        title={soundOn ? 'Turn sound off' : 'Turn sound on'}
-      >
+      <div ref={tipRef} className="band-tip" aria-hidden="true" />
+      <div className="soundctl">
+        {soundOn ? (
+          <div className="sound-pop">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(volume * 100)}
+              aria-label="Volume"
+              onChange={(e) => setVolume(Number(e.target.value) / 100)}
+            />
+          </div>
+        ) : null}
+        <button
+          className="sound-toggle"
+          onClick={() => setSoundOn((v) => !v)}
+          aria-pressed={soundOn}
+          title={soundOn ? 'Turn sound off' : 'Turn sound on'}
+        >
         {soundOn ? (
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
             <path
@@ -452,7 +513,8 @@ export function Bandscape() {
             />
           </svg>
         )}
-      </button>
+        </button>
+      </div>
     </>
   );
 }

@@ -79,7 +79,11 @@ function kmToScale(km: number): number {
   return Math.max(0.22, 1 - 0.175 * Math.log10(1 + km));
 }
 
-export function Bandscape() {
+export function Bandscape({
+  guestLocation,
+}: {
+  guestLocation: { lat: number; lng: number } | null;
+}) {
   const { user, profile, displayName } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [others, setOthers] = useState<OtherBand[]>([]);
@@ -95,22 +99,47 @@ export function Bandscape() {
   });
 
   const myColor = profile?.band_color ?? null;
-  const myLat = profile?.location_sharing ? profile?.last_lat ?? null : null;
-  const myLng = profile?.location_sharing ? profile?.last_lng ?? null : null;
+  const myLat = user
+    ? profile?.location_sharing
+      ? profile?.last_lat ?? null
+      : null
+    : guestLocation?.lat ?? null;
+  const myLng = user
+    ? profile?.location_sharing
+      ? profile?.last_lng ?? null
+      : null
+    : guestLocation?.lng ?? null;
+
+  /*
+   * Guests get a stable anonymous identity per browser so a refresh does not
+   * make them a new person to everyone else. It is a random id, nothing more.
+   */
+  const [anonId, setAnonId] = useState<string | null>(null);
+  useEffect(() => {
+    if (user) return;
+    let id = localStorage.getItem('ub_anon_id');
+    if (!id) {
+      id = `anon-${crypto.randomUUID()}`;
+      localStorage.setItem('ub_anon_id', id);
+    }
+    setAnonId(id);
+  }, [user]);
+
+  const presenceKey = user?.id ?? anonId;
 
   /* ---------- presence ---------- */
 
   useEffect(() => {
-    if (!user) return;
+    if (!presenceKey) return;
     const channel = supabase.channel('bands', {
-      config: { presence: { key: user.id } },
+      config: { presence: { key: presenceKey } },
     });
 
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState<PresencePayload>();
       const list: OtherBand[] = [];
       for (const [key, metas] of Object.entries(state)) {
-        if (key === user.id || metas.length === 0) continue;
+        if (key === presenceKey || metas.length === 0) continue;
         const m = metas[metas.length - 1];
         list.push({
           key,
@@ -125,7 +154,9 @@ export function Bandscape() {
     });
 
     channel.subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
+      // Watching is free. A band on the wall costs one location reading:
+      // no coordinates, no track, and the channel is read only for you.
+      if (status === 'SUBSCRIBED' && myLat !== null && myLng !== null) {
         await channel.track({
           name: displayName ?? 'someone',
           color: myColor,
@@ -138,7 +169,7 @@ export function Bandscape() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, displayName, myColor, myLat, myLng]);
+  }, [presenceKey, displayName, myColor, myLat, myLng]);
 
   /* ---------- layout: geography to screen positions ---------- */
 
@@ -149,15 +180,17 @@ export function Bandscape() {
       scale: number;
       color: string | null;
       label: string;
-    }> = [
-      {
+    }> = [];
+    // Your own band only exists once you have said where you are.
+    if (myLat !== null && myLng !== null) {
+      placed.push({
         key: 'self',
         frac: 0,
         scale: 1,
         color: myColor,
         label: displayName ?? 'You',
-      },
-    ];
+      });
+    }
     let unknown = 0;
     for (const o of others) {
       let frac: number;

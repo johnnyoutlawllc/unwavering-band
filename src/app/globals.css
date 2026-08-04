@@ -250,6 +250,20 @@ button:disabled {
   z-index: 10;
 }
 
+/* Same spot for guests: share a location, or quietly sign in. */
+.guestbar {
+  position: fixed;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  text-align: center;
+}
+
 .usermenu {
   position: relative;
 }

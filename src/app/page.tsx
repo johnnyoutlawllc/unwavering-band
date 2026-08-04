@@ -9,10 +9,37 @@ import { useAuth } from '@/lib/auth';
 import { supabase, type UnwaveringUser } from '@/lib/supabase';
 import { getPosition, type Reading } from '@/lib/geo';
 
+/*
+ * The room is open to everyone: nobody has to sign in to watch the bands.
+ * What signing in buys is a name, a colour and a place that persists. What
+ * sharing a location buys, signed in or not, is your own band on the wall.
+ */
 export default function Home() {
   const { user, profile, loading, error, signInWithGoogle, setProfile } =
     useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // A guest's one location reading. Never stored anywhere, it only rides the
+  // presence channel while the tab is open.
+  const [guestLoc, setGuestLoc] = useState<Reading | null>(null);
+  const [guestBusy, setGuestBusy] = useState(false);
+  const [guestError, setGuestError] = useState<string | null>(null);
+
+  async function shareAsGuest() {
+    setGuestBusy(true);
+    setGuestError(null);
+    try {
+      const pos = await getPosition();
+      setGuestLoc({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy_m: pos.coords.accuracy,
+      });
+    } catch {
+      setGuestError('The browser would not share your location.');
+    }
+    setGuestBusy(false);
+  }
 
   /*
    * Every signed in page visit gets logged once: location, date and time.
@@ -84,36 +111,44 @@ export default function Home() {
     );
   }
 
-  if (!user) {
-    return (
-      <>
-        <Field />
-        <main className="hero">
-          <h1 className="wordmark">
-            unwavering<span className="dot">.band</span>
-          </h1>
-          <button className="btn btn-primary" onClick={signInWithGoogle}>
-            Sign in and Share Your Location to begin
-          </button>
-          {error ? <p className="error">{error}</p> : null}
-        </main>
-      </>
-    );
-  }
-
   return (
     <>
       <Field />
-      <Bandscape />
-      <header className="profilebar">
-        <UserMenu onSettings={() => setSettingsOpen(true)} />
-      </header>
+      <Bandscape guestLocation={user ? null : guestLoc} />
       <div className="wordmark-top">
         <h1 className="wordmark small">
           unwavering<span className="dot">.band</span>
         </h1>
       </div>
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      {user ? (
+        <>
+          <header className="profilebar">
+            <UserMenu onSettings={() => setSettingsOpen(true)} />
+          </header>
+          <SettingsModal
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+          />
+        </>
+      ) : (
+        <div className="guestbar">
+          {!guestLoc ? (
+            <button
+              className="btn btn-primary"
+              onClick={shareAsGuest}
+              disabled={guestBusy}
+            >
+              {guestBusy ? 'Locating' : 'Share your location to see your band'}
+            </button>
+          ) : null}
+          {guestError ? <p className="error">{guestError}</p> : null}
+          <button className="btn-quiet" onClick={signInWithGoogle}>
+            Sign in with Google
+          </button>
+          {error ? <p className="error">{error}</p> : null}
+        </div>
+      )}
     </>
   );
 }

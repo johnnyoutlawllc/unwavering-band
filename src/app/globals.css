@@ -370,6 +370,12 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 1.2rem;
+  max-height: min(90dvh, 40rem);
+  overflow-y: auto;
+}
+
+.modal.modal-wide {
+  max-width: 28rem;
 }
 
 .modal-title {
@@ -389,6 +395,59 @@ button:disabled {
   font-size: 0.8rem;
   color: var(--dim);
   letter-spacing: 0.02em;
+}
+
+.field-help {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--dimmer);
+  line-height: 1.5;
+}
+
+.file-input {
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--dim);
+  width: 100%;
+}
+
+.import-status {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--dim);
+}
+
+.import-status.ok {
+  color: var(--band-5);
+}
+
+.import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.import-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+}
+
+.import-name {
+  font-size: 0.85rem;
+  color: var(--light);
+  word-break: break-all;
+}
+
+.import-meta {
+  font-size: 0.75rem;
+  color: var(--dimmer);
 }
 
 .input {

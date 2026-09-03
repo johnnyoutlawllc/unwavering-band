@@ -3,9 +3,10 @@
 A landing page for an idea taken from Kurt Vonnegut's *Breakfast of Champions*:
 that the real part of a person is a narrow, unwavering band of light. Everyone
 who signs in becomes one band. Location sharing is opt in and gives the band a
-place to stand.
+place to stand. Signed-in users can also upload a Google Timeline export into
+private history tables (fuel for the distance-over-time chart still to come).
 
-Right now this is a holding page with real auth behind it. There is no map yet.
+**Session handoff:** read `docs/START-HERE.md` first.
 
 ## Stack
 
@@ -23,23 +24,28 @@ Everything lives in the `unwavering` schema, never `public`. The schema is
 exposed to PostgREST through `authenticator`'s `pgrst.db_schemas` role setting,
 so the client only has to pass `db: { schema: 'unwavering' }`.
 
-`unwavering.users` is the only table.
+Tables:
 
-- The row is created by an `after insert` trigger on `auth.users`, so signing in
-  is enough. `src/lib/auth.tsx` inserts a row itself as a fallback for accounts
-  that predate the trigger.
-- RLS is on and every policy is `auth.uid() = id`. A signed in person can read
-  and write exactly one row: their own. Anon has nothing.
-- Turning location sharing off nulls the coordinates as well as the flag.
-  Withdrawn consent takes the data with it. Keep it that way.
+- `users` — profile + live location. Created by trigger on `auth.users`, with
+  an upsert fallback in `src/lib/auth.tsx`.
+- `visits` — one row per signed-in page visit (not Google Timeline).
+- `location_imports` / `location_segments` / `location_path_points` — private
+  Google Timeline history. See `docs/SCHEMA.md`.
+
+RLS is on. History tables are `auth.uid() = user_id` only. Anon has nothing.
+Turning live location sharing off nulls the coordinates as well as the flag.
 
 ## Local
 
 ```bash
-cp .env.example .env.local   # fill in the anon key
+cp .env.example .env.local   # fill in the anon key (or pull from Vercel)
 npm install
 npm run dev
 ```
+
+Settings → Your Timeline accepts `location-history.json` from Google Timeline.
+Do not commit real exports. A synthetic sample is in
+`docs/samples/location-history.sample.json`.
 
 ## Deploying
 

@@ -18,6 +18,7 @@ type Props = {
   places: PlaceRow[];
   bounds: MapBounds;
   selectedId: string | null;
+  focusPoint?: HistoryMapPoint | null;
   onSelect: (point: HistoryMapPoint) => void;
 };
 
@@ -29,6 +30,7 @@ type MapHandle = {
   canvas: HTMLCanvasElement;
   detailLayer: import('leaflet').LayerGroup;
   placeLayer: import('leaflet').LayerGroup;
+  selectedLayer: import('leaflet').LayerGroup;
 };
 
 export function HistoryHeatmap({
@@ -36,6 +38,7 @@ export function HistoryHeatmap({
   places,
   bounds,
   selectedId,
+  focusPoint = null,
   onSelect,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -78,7 +81,15 @@ export function HistoryHeatmap({
       map.getPanes().overlayPane.appendChild(canvas);
       const detailLayer = L.layerGroup().addTo(map);
       const placeLayer = L.layerGroup().addTo(map);
-      const handle: MapHandle = { L, map, canvas, detailLayer, placeLayer };
+      const selectedLayer = L.layerGroup().addTo(map);
+      const handle: MapHandle = {
+        L,
+        map,
+        canvas,
+        detailLayer,
+        placeLayer,
+        selectedLayer,
+      };
       handleRef.current = handle;
 
       const redraw = () => {
@@ -118,9 +129,17 @@ export function HistoryHeatmap({
         [bounds.south, bounds.west],
         [bounds.north, bounds.east],
       ],
-      { padding: [24, 24], animate: false, maxZoom: 15 },
+      { padding: [28, 28], animate: true, maxZoom: 14 },
     );
-  }, [bounds]);
+  }, [bounds.south, bounds.north, bounds.west, bounds.east]);
+
+  useEffect(() => {
+    const handle = handleRef.current;
+    if (!handle || !focusPoint) return;
+    handle.map.flyTo([focusPoint.lat, focusPoint.lng], 15, {
+      duration: 0.55,
+    });
+  }, [focusPoint?.id, focusPoint?.lat, focusPoint?.lng]);
 
   useEffect(() => {
     const handle = handleRef.current;
@@ -144,7 +163,7 @@ function paintMap(
   selectedId: string | null,
   onSelect: (point: HistoryMapPoint) => void,
 ) {
-  const { L, map, canvas, detailLayer, placeLayer } = handle;
+  const { L, map, canvas, detailLayer, placeLayer, selectedLayer } = handle;
   const size = map.getSize();
   const ratio = window.devicePixelRatio || 1;
   canvas.width = size.x * ratio;
@@ -192,20 +211,45 @@ function paintMap(
   if (map.getZoom() >= 11) {
     const visible = map.getBounds();
     for (const point of points) {
+      if (point.id === selectedId) continue;
       const latLng = L.latLng(point.lat, point.lng);
       if (!visible.contains(latLng)) continue;
-      const selected = point.id === selectedId;
       const fill = point.color || '#f1f1f1';
       L.circleMarker(latLng, {
-        radius: selected ? 7 : 4,
-        color: selected ? fill : 'rgba(255,255,255,.9)',
-        weight: selected ? 2 : 1,
+        radius: 4,
+        color: 'rgba(255,255,255,.9)',
+        weight: 1,
         fillColor: fill,
         fillOpacity: 0.95,
       })
         .addTo(detailLayer)
         .on('click', () => onSelect(point));
     }
+  }
+
+  selectedLayer.clearLayers();
+  const selected = selectedId
+    ? points.find((point) => point.id === selectedId)
+    : null;
+  if (selected) {
+    const fill = selected.color || OWN_HISTORY_COLOR;
+    const latLng = L.latLng(selected.lat, selected.lng);
+    L.circleMarker(latLng, {
+      radius: 11,
+      color: '#fff',
+      weight: 2,
+      fillColor: fill,
+      fillOpacity: 0.2,
+    }).addTo(selectedLayer);
+    L.circleMarker(latLng, {
+      radius: 7,
+      color: '#fff',
+      weight: 2,
+      fillColor: fill,
+      fillOpacity: 1,
+    })
+      .addTo(selectedLayer)
+      .on('click', () => onSelect(selected));
   }
 
   placeLayer.clearLayers();

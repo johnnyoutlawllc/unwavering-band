@@ -42,3 +42,10 @@ the Realtime channel.
 Brad Wheeler's export is real private data under `Internal Files\`. The repo
 only carries a three-record synthetic sample. Do not copy the full file into
 `public/` or `docs/`.
+
+## Vault unlock persists in this browser
+
+After unlock, CryptoKeys live in IndexedDB (`ub_vault`) keyed by user id. Refresh
+and new tabs stay unlocked. Passphrase is never stored. Explicit **Lock vault**
+or sign-out clears the store. This is a deliberate trade: convenience on a
+trusted device vs. requiring the passphrase on every load.

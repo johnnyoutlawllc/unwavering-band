@@ -11,6 +11,7 @@ import {
 } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabase, type UnwaveringUser } from './supabase';
+import { clearVaultKeys } from './vault-store';
 
 type Ctx = {
   user: User | null;
@@ -206,10 +207,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     setError(null);
+    const uid = user?.id;
     const { error: err } = await supabase.auth.signOut();
     if (err) setError(err.message);
-    else setProfile(null);
-  }, []);
+    else {
+      setProfile(null);
+      if (uid) void clearVaultKeys(uid);
+    }
+  }, [user]);
 
   const refreshProfile = useCallback(async () => {
     await loadProfile(user);

@@ -17,6 +17,7 @@ import {
   type VaultKeys,
 } from './crypto';
 import { supabase, type UnwaveringUser } from './supabase';
+import { clearVaultKeys, loadVaultKeys, saveVaultKeys } from './vault-store';
 
 type VaultCtx = {
   ready: boolean;
@@ -35,10 +36,7 @@ type VaultCtx = {
 
 const VaultContext = createContext<VaultCtx | null>(null);
 
-const SESSION_FLAG = 'ub_vault_unlocked';
-
 async function migratePlaintext(userId: string, keys: VaultKeys): Promise<string> {
-  // Segments with plaintext coords still present.
   const { data: segs, error: segErr } = await supabase
     .from('location_segments')
     .select(
@@ -104,9 +102,6 @@ async function migratePlaintext(userId: string, keys: VaultKeys): Promise<string
     n += 1;
   }
 
-  // Path points require non-null lat/lng — zero them after cipher is written.
-  // Prefer a sentinel; readers must use cipher when present.
-
   const { data: places, error: plErr } = await supabase
     .from('places')
     .select('id, lat, lng, lat_cipher')
@@ -158,38 +153,57 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [migrating, setMigrating] = useState(false);
   const [migrateProgress, setMigrateProgress] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(true);
 
   const enabled = Boolean(profile?.encryption_enabled_at && profile?.wrapped_dek);
 
   useEffect(() => {
-    if (!user) {
-      setKeys(null);
-      return;
+    let cancelled = false;
+    async function restore() {
+      if (!user) {
+        setKeys(null);
+        setRestoring(false);
+        return;
+      }
+      setRestoring(true);
+      try {
+        const stored = await loadVaultKeys(user.id);
+        if (!cancelled && stored) setKeys(stored);
+        else if (!cancelled) setKeys(null);
+      } catch {
+        if (!cancelled) setKeys(null);
+      } finally {
+        if (!cancelled) setRestoring(false);
+      }
     }
-    // Never persist the passphrase or DEK. Session flag only remembers that
-    // this tab had unlocked; keys stay in memory and drop on refresh.
-    if (sessionStorage.getItem(SESSION_FLAG) !== user.id) {
-      setKeys(null);
-    }
+    void restore();
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
-  const runMigrate = useCallback(
-    async (u: string, k: VaultKeys) => {
-      setMigrating(true);
-      setMigrateProgress('Encrypting stored locations…');
-      try {
-        // Loop until a pass migrates nothing (chunked).
-        for (let i = 0; i < 40; i++) {
-          const msg = await migratePlaintext(u, k);
-          setMigrateProgress(msg);
-          if (msg.startsWith('All')) break;
-        }
-      } finally {
-        setMigrating(false);
+  const runMigrate = useCallback(async (u: string, k: VaultKeys) => {
+    setMigrating(true);
+    setMigrateProgress('Encrypting stored locations…');
+    try {
+      for (let i = 0; i < 40; i++) {
+        const msg = await migratePlaintext(u, k);
+        setMigrateProgress(msg);
+        if (msg.startsWith('All')) break;
       }
-    },
-    [],
-  );
+    } finally {
+      setMigrating(false);
+    }
+  }, []);
+
+  const remember = useCallback(async (userId: string, k: VaultKeys) => {
+    setKeys(k);
+    try {
+      await saveVaultKeys(userId, k);
+    } catch {
+      // Memory unlock still works if IndexedDB is blocked.
+    }
+  }, []);
 
   const setup = useCallback(
     async (passphrase: string) => {
@@ -206,8 +220,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           .single();
         if (err) throw err;
         setProfile(data as UnwaveringUser);
-        setKeys(k);
-        sessionStorage.setItem(SESSION_FLAG, user.id);
+        await remember(user.id, k);
         await runMigrate(user.id, k);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Could not set up encryption.');
@@ -216,12 +229,18 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         setBusy(false);
       }
     },
-    [user, setProfile, runMigrate],
+    [user, setProfile, runMigrate, remember],
   );
 
   const unlock = useCallback(
     async (passphrase: string) => {
-      if (!user || !profile?.crypto_salt || !profile.wrapped_dek || !profile.wrapped_privkey || !profile.crypto_pubkey) {
+      if (
+        !user ||
+        !profile?.crypto_salt ||
+        !profile.wrapped_dek ||
+        !profile.wrapped_privkey ||
+        !profile.crypto_pubkey
+      ) {
         throw new Error('Encryption is not set up yet.');
       }
       setBusy(true);
@@ -233,8 +252,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           wrapped_privkey: profile.wrapped_privkey,
           crypto_pubkey: profile.crypto_pubkey,
         });
-        setKeys(k);
-        sessionStorage.setItem(SESSION_FLAG, user.id);
+        await remember(user.id, k);
         await runMigrate(user.id, k);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Could not unlock.');
@@ -243,17 +261,18 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         setBusy(false);
       }
     },
-    [user, profile, runMigrate],
+    [user, profile, runMigrate, remember],
   );
 
   const lock = useCallback(() => {
     setKeys(null);
-    if (user) sessionStorage.removeItem(SESSION_FLAG);
+    if (user) void clearVaultKeys(user.id);
+    else void clearVaultKeys();
   }, [user]);
 
   const value = useMemo<VaultCtx>(
     () => ({
-      ready: !loading,
+      ready: !loading && !restoring,
       unlocked: Boolean(keys),
       enabled,
       keys,
@@ -266,7 +285,19 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       lock,
       clearError: () => setError(null),
     }),
-    [loading, keys, enabled, busy, error, migrating, migrateProgress, setup, unlock, lock],
+    [
+      loading,
+      restoring,
+      keys,
+      enabled,
+      busy,
+      error,
+      migrating,
+      migrateProgress,
+      setup,
+      unlock,
+      lock,
+    ],
   );
 
   return <VaultContext.Provider value={value}>{children}</VaultContext.Provider>;

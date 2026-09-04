@@ -86,4 +86,26 @@ export type DistancePoint = {
   their_lng: number | null;
   their_place: string | null;
   their_tier: PrivacyTier;
+  my_place?: string | null;
+};
+
+/** Stored per-relationship distance report (plaintext summary; no raw secrets). */
+export type DistanceReportRow = {
+  relationship_id: string;
+  day: string;
+  occurred_at: string;
+  distance_km: number;
+  requester_id: string;
+  addressee_id: string;
+  requester_name: string;
+  addressee_name: string;
+  requester_place: string | null;
+  addressee_place: string | null;
+  requester_tier: PrivacyTier;
+  addressee_tier: PrivacyTier;
+  requester_lat: number | null;
+  requester_lng: number | null;
+  addressee_lat: number | null;
+  addressee_lng: number | null;
+  computed_at: string;
 };

@@ -9,7 +9,7 @@
 
 ## Product gaps
 
-- No visualization of imported history yet (the whole point of ingesting it).
+- City/state ranking bars (Outlaw Data style) need reverse-geocode labels.
 - Live location sharing and Timeline upload are independent. Opting out of live
   sharing does not delete imported history (deliberate until we ask Johnny).
 - Very large Takeouts (multi-year, tens of MB) may need a server import path.

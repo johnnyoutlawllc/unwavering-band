@@ -32,7 +32,7 @@ time. The live bandscape (`/app/now`) remains as the "Now" view.
 |---|---|
 | `/` | Story landing (Now / Later / Over time) |
 | `/signin` | Google + email/password |
-| `/app/history` | Personal visits + named places |
+| `/app/history` | Personal heatmap + named places |
 | `/app/people` | Invite, accept, privacy tiers |
 | `/app/people/[id]` | Distance-over-time chart |
 | `/app/now` | Live bandscape presence |

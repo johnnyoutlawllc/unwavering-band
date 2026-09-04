@@ -9,6 +9,20 @@ export type DecryptedVisit = VisitSegment & {
   lng: number | null;
 };
 
+/** One map-ready coordinate from Timeline (visit center or trip endpoint). */
+export type HistoryMapPoint = {
+  id: string;
+  source: 'visit' | 'trip_start' | 'trip_end';
+  occurredAt: string;
+  endTime: string | null;
+  lat: number;
+  lng: number;
+  semanticType: string | null;
+  activityType: string | null;
+  placeId: string | null;
+  distanceMeters: number | null;
+};
+
 export async function listRecentVisits(
   keys: VaultKeys,
   limit = 200,
@@ -48,6 +62,101 @@ export async function listRecentVisits(
       semantic_type: row.semantic_type,
       place_id: row.place_id,
     });
+  }
+  return out;
+}
+
+export async function listHistoryMapPoints(
+  keys: VaultKeys,
+  limit = 4000,
+): Promise<HistoryMapPoint[]> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  const { data, error } = await supabase
+    .from('location_segments')
+    .select(
+      `id, kind, start_time, end_time, semantic_type, activity_type, place_id,
+       distance_meters, lat, lng, lat_cipher, lng_cipher,
+       start_lat, start_lng, start_lat_cipher, start_lng_cipher,
+       end_lat, end_lng, end_lat_cipher, end_lng_cipher`,
+    )
+    .eq('user_id', user.id)
+    .in('kind', ['visit', 'activity'])
+    .order('start_time', { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+
+  const out: HistoryMapPoint[] = [];
+  for (const row of data ?? []) {
+    if (row.kind === 'visit') {
+      const coords = await openCoords(
+        keys.dek,
+        row.lat_cipher,
+        row.lng_cipher,
+        row.lat,
+        row.lng,
+      );
+      if (!coords) continue;
+      out.push({
+        id: `${row.id}:visit`,
+        source: 'visit',
+        occurredAt: row.start_time,
+        endTime: row.end_time,
+        lat: coords.lat,
+        lng: coords.lng,
+        semanticType: row.semantic_type,
+        activityType: null,
+        placeId: row.place_id,
+        distanceMeters: null,
+      });
+      continue;
+    }
+
+    const start = await openCoords(
+      keys.dek,
+      row.start_lat_cipher,
+      row.start_lng_cipher,
+      row.start_lat,
+      row.start_lng,
+    );
+    if (start) {
+      out.push({
+        id: `${row.id}:start`,
+        source: 'trip_start',
+        occurredAt: row.start_time,
+        endTime: row.end_time,
+        lat: start.lat,
+        lng: start.lng,
+        semanticType: row.semantic_type,
+        activityType: row.activity_type,
+        placeId: row.place_id,
+        distanceMeters: row.distance_meters,
+      });
+    }
+    const end = await openCoords(
+      keys.dek,
+      row.end_lat_cipher,
+      row.end_lng_cipher,
+      row.end_lat,
+      row.end_lng,
+    );
+    if (end) {
+      out.push({
+        id: `${row.id}:end`,
+        source: 'trip_end',
+        occurredAt: row.end_time ?? row.start_time,
+        endTime: row.end_time,
+        lat: end.lat,
+        lng: end.lng,
+        semanticType: row.semantic_type,
+        activityType: row.activity_type,
+        placeId: row.place_id,
+        distanceMeters: row.distance_meters,
+      });
+    }
   }
   return out;
 }
@@ -173,6 +282,9 @@ export function matchPlace(
 }
 
 export async function deleteMyAccount(): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const { error } = await supabase.rpc('delete_my_data');
   if (error) throw error;
   try {
@@ -186,6 +298,10 @@ export async function deleteMyAccount(): Promise<void> {
     }
   } catch {
     // Data is already gone; auth row may remain until support cleans it.
+  }
+  if (user) {
+    const { clearVaultKeys } = await import('./vault-store');
+    await clearVaultKeys(user.id);
   }
   await supabase.auth.signOut();
 }

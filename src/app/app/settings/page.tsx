@@ -181,7 +181,7 @@ export default function SettingsPage() {
         <h2>Encryption</h2>
         <p className="field-help">
           {unlocked
-            ? 'Vault unlocked in this browser tab. Coordinates are sealed before storage.'
+            ? 'Vault unlocked on this browser. Coordinates are sealed before storage. Refresh keeps you unlocked until you lock or sign out.'
             : 'Vault locked.'}{' '}
           <Link href="/privacy">Privacy Policy</Link>
         </p>

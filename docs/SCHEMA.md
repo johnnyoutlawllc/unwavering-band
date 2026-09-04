@@ -47,4 +47,15 @@ Unique pair index on `least/greatest` for active rows.
 | `relationship_peer(id)` | Single peer view |
 | `relationship_distance_series(id, from?, to?)` | Daily miles + privacy-filtered peer coords |
 
-Anon has no table grants. Authenticated only under RLS / these RPCs.
+## `relationship_daily_shares`
+
+Encrypted daily position payloads under the relationship key. Authors write;
+both parties in an accepted relationship may read ciphertext.
+
+## `relationship_distance_days`
+
+Per-relationship **reporting** table: one row per overlapping visit day with
+`occurred_at`, `distance_km`, both display names, place labels (when privacy
+allows), and coarse/exact coords (when privacy allows). Written by the client
+after decrypting shares so the People chart can load without rebuilding from
+scratch every visit. RLS: either party on an accepted relationship.

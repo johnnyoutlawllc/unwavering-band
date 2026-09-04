@@ -161,7 +161,7 @@ export async function unlockVault(
       privBytes.byteOffset + privBytes.byteLength,
     ) as ArrayBuffer,
     { name: 'ECDH', namedCurve: 'P-256' },
-    false,
+    true,
     ['deriveBits'],
   );
   return {

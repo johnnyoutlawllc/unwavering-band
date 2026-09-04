@@ -54,8 +54,14 @@ both parties in an accepted relationship may read ciphertext.
 
 ## `relationship_distance_days`
 
-Per-relationship **reporting** table: one row per overlapping visit day with
+Per-relationship reporting table: one row per overlapping visit day with
 `occurred_at`, `distance_km`, both display names, place labels (when privacy
 allows), and coarse/exact coords (when privacy allows). Written by the client
 after decrypting shares so the People chart can load without rebuilding from
 scratch every visit. RLS: either party on an accepted relationship.
+
+## `geo_cells`
+
+Shared reverse-geocode cache: rounded lat/lng cells (~1.1 km) plus city /
+state / country labels. No user ids or timestamps. Filled by `/api/geocode`
+(LocationIQ) so the same cell is never looked up twice.

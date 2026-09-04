@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { HistoryHeatmap } from '@/components/HistoryHeatmap';
+import { enrichCoordsWithLocality } from '@/lib/geo-enrich';
 import {
   createPlace,
   deletePlace,
@@ -9,6 +10,7 @@ import {
   listHistoryMapPoints,
   listPlaces,
   matchPlace,
+  updatePlaceName,
   type HistoryMapPoint,
 } from '@/lib/history';
 import type { PlaceRow } from '@/lib/supabase';
@@ -30,6 +32,34 @@ function dateRangeNote(first: string | null, last: string | null): string {
   return `${fmt.format(new Date(first))} to ${fmt.format(new Date(last))}`;
 }
 
+function labelOr(value: string | null | undefined, fallback: string) {
+  const trimmed = value?.trim();
+  return trimmed || fallback;
+}
+
+type RankRow = { label: string; days: number };
+
+function daysByLabel(
+  points: HistoryMapPoint[],
+  pick: (p: HistoryMapPoint) => string,
+): RankRow[] {
+  const grouped = new Map<string, Set<string>>();
+  for (const point of points) {
+    const label = pick(point);
+    const days = grouped.get(label) ?? new Set<string>();
+    days.add(dayOf(point.occurredAt));
+    grouped.set(label, days);
+  }
+  return [...grouped.entries()]
+    .map(([label, days]) => ({ label, days: days.size }))
+    .sort((a, b) => b.days - a.days || a.label.localeCompare(b.label))
+    .slice(0, 12);
+}
+
+type NamingTarget =
+  | { kind: 'point'; point: HistoryMapPoint }
+  | { kind: 'place'; place: PlaceRow };
+
 export default function HistoryPage() {
   const { keys } = useVault();
   const [points, setPoints] = useState<HistoryMapPoint[]>([]);
@@ -42,16 +72,21 @@ export default function HistoryPage() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [geoStatus, setGeoStatus] = useState('');
   const [selected, setSelected] = useState<HistoryMapPoint | null>(null);
-  const [naming, setNaming] = useState(false);
+  const [naming, setNaming] = useState<NamingTarget | null>(null);
   const [placeName, setPlaceName] = useState('');
   const [busy, setBusy] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [city, setCity] = useState<string | null>(null);
+  const [state, setState] = useState<string | null>(null);
+  const [dayFocus, setDayFocus] = useState<string | null>(null);
 
   async function reload() {
     if (!keys) return;
     setLoading(true);
+    setGeoStatus('');
     try {
       const [p, pl, s] = await Promise.all([
         listHistoryMapPoints(keys),
@@ -66,8 +101,18 @@ export default function HistoryPage() {
         setTo((prev) => prev || dayOf(p[p.length - 1].occurredAt));
       }
       setError(null);
+
+      setGeoStatus('Looking up city and state labels…');
+      const enriched = await enrichCoordsWithLocality(p);
+      setPoints(enriched);
+      setGeoStatus(
+        enriched.some((row) => row.city || row.state)
+          ? ''
+          : 'City labels unavailable yet (cache still filling).',
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load history.');
+      setGeoStatus('');
     } finally {
       setLoading(false);
     }
@@ -81,13 +126,24 @@ export default function HistoryPage() {
   const firstDay = points[0] ? dayOf(points[0].occurredAt) : '';
   const lastDay = points.length ? dayOf(points[points.length - 1].occurredAt) : '';
 
-  const filtered = useMemo(
+  const dateFiltered = useMemo(
     () =>
       points.filter((point) => {
         const day = dayOf(point.occurredAt);
         return (!from || day >= from) && (!to || day <= to);
       }),
     [from, points, to],
+  );
+
+  const filtered = useMemo(
+    () =>
+      dateFiltered.filter((point) => {
+        if (dayFocus && dayOf(point.occurredAt) !== dayFocus) return false;
+        if (city && labelOr(point.city, 'City unavailable') !== city) return false;
+        if (state && labelOr(point.state, 'State unavailable') !== state) return false;
+        return true;
+      }),
+    [city, dateFiltered, dayFocus, state],
   );
 
   const bounds = useMemo(() => {
@@ -115,9 +171,30 @@ export default function HistoryPage() {
   const tripCount = filtered.filter((p) => p.source !== 'visit').length;
 
   const selectedPlace =
-    selected && selected.source === 'visit'
-      ? matchPlace(places, selected.lat, selected.lng)
-      : null;
+    selected != null ? matchPlace(places, selected.lat, selected.lng) : null;
+
+  const cityRows = useMemo(
+    () =>
+      daysByLabel(
+        dateFiltered.filter(
+          (p) => !state || labelOr(p.state, 'State unavailable') === state,
+        ),
+        (p) => labelOr(p.city, 'City unavailable'),
+      ),
+    [dateFiltered, state],
+  );
+  const stateRows = useMemo(
+    () =>
+      daysByLabel(
+        dateFiltered.filter(
+          (p) => !city || labelOr(p.city, 'City unavailable') === city,
+        ),
+        (p) => labelOr(p.state, 'State unavailable'),
+      ),
+    [city, dateFiltered],
+  );
+  const cityMax = Math.max(1, ...cityRows.map((r) => r.days));
+  const stateMax = Math.max(1, ...stateRows.map((r) => r.days));
 
   const dayBars = useMemo(() => {
     const grouped = new Map<string, number>();
@@ -131,17 +208,30 @@ export default function HistoryPage() {
   }, [filtered]);
   const dayMax = Math.max(1, ...dayBars.map((r) => r.count));
 
-  async function onNamePlace(e: FormEvent) {
+  const listPoints = useMemo(() => {
+    const visits = filtered.filter((p) => p.source === 'visit');
+    return (visits.length ? visits : filtered).slice(0, 120);
+  }, [filtered]);
+
+  async function onSaveName(e: FormEvent) {
     e.preventDefault();
-    if (!keys || !selected || !placeName.trim()) return;
+    if (!keys || !naming || !placeName.trim()) return;
     setBusy(true);
     try {
-      await createPlace(keys, {
-        name: placeName,
-        lat: selected.lat,
-        lng: selected.lng,
-      });
-      setNaming(false);
+      if (naming.kind === 'place') {
+        await updatePlaceName(naming.place.id, placeName);
+      } else {
+        const existing = matchPlace(places, naming.point.lat, naming.point.lng);
+        if (existing) await updatePlaceName(existing.id, placeName);
+        else {
+          await createPlace(keys, {
+            name: placeName,
+            lat: naming.point.lat,
+            lng: naming.point.lng,
+          });
+        }
+      }
+      setNaming(null);
       setPlaceName('');
       await reload();
     } catch (err) {
@@ -153,7 +243,21 @@ export default function HistoryPage() {
   function resetFilters() {
     setFrom(firstDay);
     setTo(lastDay);
+    setCity(null);
+    setState(null);
+    setDayFocus(null);
     setSelected(null);
+  }
+
+  function openNamePoint(point: HistoryMapPoint) {
+    const existing = matchPlace(places, point.lat, point.lng);
+    if (existing) {
+      setNaming({ kind: 'place', place: existing });
+      setPlaceName(existing.name);
+    } else {
+      setNaming({ kind: 'point', point });
+      setPlaceName(point.semanticType ?? point.city ?? '');
+    }
   }
 
   return (
@@ -162,7 +266,8 @@ export default function HistoryPage() {
         <h1>Your history</h1>
         <p>
           Visits and trips from your imported timeline, decrypted only on this
-          device. Zoom in to inspect a point, then name the places that matter.
+          device. Filter by city or day, inspect a point on the map, and name
+          the places that matter.
         </p>
       </header>
 
@@ -198,10 +303,46 @@ export default function HistoryPage() {
         <button type="button" className="btn" onClick={resetFilters}>
           Reset
         </button>
+        {(city || state || dayFocus) && (
+          <div className="history-filter-chips">
+            {dayFocus ? (
+              <button
+                type="button"
+                className="history-filter-chip"
+                onClick={() => setDayFocus(null)}
+              >
+                Day: {dayFocus} ×
+              </button>
+            ) : null}
+            {city ? (
+              <button
+                type="button"
+                className="history-filter-chip"
+                onClick={() => setCity(null)}
+              >
+                City: {city} ×
+              </button>
+            ) : null}
+            {state ? (
+              <button
+                type="button"
+                className="history-filter-chip"
+                onClick={() => setState(null)}
+              >
+                State: {state} ×
+              </button>
+            ) : null}
+          </div>
+        )}
       </div>
       <p className="field-help history-privacy-note">
-        Coordinates stay on this device after decryption. The basemap provider
-        only receives the visible map tile requests, not your stored history.
+        Exact coordinates stay on this device. City and state labels use a shared
+        cache of rounded cells (~1 km);{' '}
+        <a href="https://locationiq.com" target="_blank" rel="noreferrer">
+          LocationIQ
+        </a>{' '}
+        never sees your full history.
+        {geoStatus ? ` ${geoStatus}` : ''}
       </p>
 
       <div className="stat-row">
@@ -245,7 +386,8 @@ export default function HistoryPage() {
           <h2>Location history heatmap</h2>
           <p>
             Brighter areas represent more activity. Zoom to neighborhood level
-            to reveal individual, clickable records.
+            to reveal individual, clickable records. Select a city, state, or day
+            below to filter.
           </p>
         </div>
         <div className="history-map-frame">
@@ -266,6 +408,11 @@ export default function HistoryPage() {
                       sourceLabel(selected.source)}
                   </strong>
                   <div>{new Date(selected.occurredAt).toLocaleString()}</div>
+                  {(selected.city || selected.state) && (
+                    <div className="muted">
+                      {[selected.city, selected.state].filter(Boolean).join(', ')}
+                    </div>
+                  )}
                   {selected.endTime && selected.source === 'visit' ? (
                     <div className="muted">
                       Until {new Date(selected.endTime).toLocaleString()}
@@ -277,27 +424,14 @@ export default function HistoryPage() {
                   </div>
                   <div className="muted">
                     {selected.lat.toFixed(5)}, {selected.lng.toFixed(5)}
-                    {selected.distanceMeters != null
-                      ? ` · ${Math.round(selected.distanceMeters)} m trip`
-                      : ''}
                   </div>
-                  {selected.placeId ? (
-                    <div className="muted">Google place {selected.placeId}</div>
-                  ) : null}
-                  {!selectedPlace ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary history-point-action"
-                      onClick={() => {
-                        setNaming(true);
-                        setPlaceName(selected.semanticType ?? '');
-                      }}
-                    >
-                      Name this place
-                    </button>
-                  ) : (
-                    <div className="muted">Labeled {selectedPlace.name}</div>
-                  )}
+                  <button
+                    type="button"
+                    className="btn btn-primary history-point-action"
+                    onClick={() => openNamePoint(selected)}
+                  >
+                    {selectedPlace ? 'Rename place' : 'Name this place'}
+                  </button>
                 </div>
               ) : null}
             </>
@@ -311,13 +445,102 @@ export default function HistoryPage() {
         </div>
       </section>
 
+      <div className="history-rank-grid">
+        <section className="history-rank-card">
+          <h2>Total days in city</h2>
+          <p className="field-help">Select a bar to filter the map and list.</p>
+          <div className="history-day-bars">
+            {cityRows.length === 0 ? (
+              <p className="field-help">No city labels yet.</p>
+            ) : (
+              cityRows.map((row) => (
+                <button
+                  key={row.label}
+                  type="button"
+                  className={
+                    city === row.label
+                      ? 'history-day-bar-row active'
+                      : 'history-day-bar-row'
+                  }
+                  onClick={() => {
+                    setCity((v) => (v === row.label ? null : row.label));
+                    setSelected(null);
+                  }}
+                >
+                  <span className="history-day-bar-label">{row.label}</span>
+                  <div className="history-day-bar-track">
+                    <div
+                      className="history-day-bar-fill"
+                      style={{
+                        width: `${Math.max(4, (row.days / cityMax) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  <strong>{row.days}</strong>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+        <section className="history-rank-card">
+          <h2>Total days in state</h2>
+          <p className="field-help">Select a bar to filter the map and list.</p>
+          <div className="history-day-bars">
+            {stateRows.length === 0 ? (
+              <p className="field-help">No state labels yet.</p>
+            ) : (
+              stateRows.map((row) => (
+                <button
+                  key={row.label}
+                  type="button"
+                  className={
+                    state === row.label
+                      ? 'history-day-bar-row active'
+                      : 'history-day-bar-row'
+                  }
+                  onClick={() => {
+                    setState((v) => (v === row.label ? null : row.label));
+                    setSelected(null);
+                  }}
+                >
+                  <span className="history-day-bar-label">{row.label}</span>
+                  <div className="history-day-bar-track">
+                    <div
+                      className="history-day-bar-fill"
+                      style={{
+                        width: `${Math.max(4, (row.days / stateMax) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  <strong>{row.days}</strong>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+      </div>
+
       {dayBars.length > 0 ? (
         <section className="subpanel">
           <h2>Activity by day</h2>
-          <p className="field-help">Location records for the current date range.</p>
+          <p className="field-help">
+            Select a day to focus the map and show those locations below.
+          </p>
           <div className="history-day-bars">
             {dayBars.slice(-40).map((row) => (
-              <div key={row.label} className="history-day-bar-row">
+              <button
+                key={row.label}
+                type="button"
+                className={
+                  dayFocus === row.label
+                    ? 'history-day-bar-row active'
+                    : 'history-day-bar-row'
+                }
+                onClick={() => {
+                  setDayFocus((v) => (v === row.label ? null : row.label));
+                  setSelected(null);
+                }}
+              >
                 <span className="history-day-bar-label">{row.label}</span>
                 <div className="history-day-bar-track">
                   <div
@@ -326,11 +549,61 @@ export default function HistoryPage() {
                   />
                 </div>
                 <strong>{row.count}</strong>
-              </div>
+              </button>
             ))}
           </div>
         </section>
       ) : null}
+
+      <section className="subpanel">
+        <h2>Locations in view</h2>
+        <p className="field-help">
+          {listPoints.length.toLocaleString()} location
+          {listPoints.length === 1 ? '' : 's'} matching the current filters.
+          Select one to highlight it on the map, then rename it.
+        </p>
+        {listPoints.length === 0 ? (
+          <p className="field-help">No locations in this filter.</p>
+        ) : (
+          <ul className="visit-list">
+            {listPoints.map((point) => {
+              const place = matchPlace(places, point.lat, point.lng);
+              return (
+                <li
+                  key={point.id}
+                  className={selected?.id === point.id ? 'is-selected' : undefined}
+                >
+                  <button
+                    type="button"
+                    className="history-loc-main"
+                    onClick={() => setSelected(point)}
+                  >
+                    <strong>
+                      {place?.name ??
+                        point.semanticType ??
+                        sourceLabel(point.source)}
+                    </strong>
+                    <span className="muted">
+                      {new Date(point.occurredAt).toLocaleString()}
+                      {point.city || point.state
+                        ? ` · ${[point.city, point.state].filter(Boolean).join(', ')}`
+                        : ''}
+                      {` · ${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-quiet"
+                    onClick={() => openNamePoint(point)}
+                  >
+                    {place ? 'Rename' : 'Name'}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       {places.length > 0 ? (
         <section className="subpanel">
@@ -344,33 +617,48 @@ export default function HistoryPage() {
                     {p.lat.toFixed(4)}, {p.lng.toFixed(4)} · {Math.round(p.radius_m)}m
                   </span>
                 </div>
-                <button
-                  type="button"
-                  className="btn-quiet"
-                  onClick={async () => {
-                    await deletePlace(p.id);
-                    await reload();
-                  }}
-                >
-                  Remove
-                </button>
+                <div className="people-actions">
+                  <button
+                    type="button"
+                    className="btn-quiet"
+                    onClick={() => {
+                      setNaming({ kind: 'place', place: p });
+                      setPlaceName(p.name);
+                    }}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-quiet"
+                    onClick={async () => {
+                      await deletePlace(p.id);
+                      await reload();
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         </section>
       ) : null}
 
-      {naming && selected ? (
-        <div className="overlay" onClick={() => setNaming(false)}>
+      {naming ? (
+        <div className="overlay" onClick={() => setNaming(null)}>
           <form
             className="modal"
             onClick={(e) => e.stopPropagation()}
-            onSubmit={onNamePlace}
+            onSubmit={onSaveName}
           >
-            <h2 className="modal-title">Name this place</h2>
+            <h2 className="modal-title">
+              {naming.kind === 'place' ? 'Rename place' : 'Name this place'}
+            </h2>
             <p className="field-help">
-              Saved encrypted against {selected.lat.toFixed(5)},{' '}
-              {selected.lng.toFixed(5)}.
+              {naming.kind === 'place'
+                ? `Saved encrypted against ${naming.place.lat.toFixed(5)}, ${naming.place.lng.toFixed(5)}.`
+                : `Saved encrypted against ${naming.point.lat.toFixed(5)}, ${naming.point.lng.toFixed(5)}.`}
             </p>
             <label className="fieldset">
               <span className="field-label">Name</span>
@@ -384,7 +672,7 @@ export default function HistoryPage() {
               />
             </label>
             <div className="row">
-              <button type="button" className="btn" onClick={() => setNaming(false)}>
+              <button type="button" className="btn" onClick={() => setNaming(null)}>
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary" disabled={busy}>

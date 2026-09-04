@@ -21,6 +21,9 @@ export type HistoryMapPoint = {
   activityType: string | null;
   placeId: string | null;
   distanceMeters: number | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
 };
 
 export async function listRecentVisits(
@@ -257,6 +260,16 @@ export async function createPlace(
     .single();
   if (error) throw error;
   return { ...(data as PlaceRow), lat: input.lat, lng: input.lng };
+}
+
+export async function updatePlaceName(id: string, name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('Name is required.');
+  const { error } = await supabase
+    .from('places')
+    .update({ name: trimmed, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw error;
 }
 
 export async function deletePlace(id: string): Promise<void> {

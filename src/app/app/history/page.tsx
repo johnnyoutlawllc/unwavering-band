@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { HistoryHeatmap } from '@/components/HistoryHeatmap';
 import { enrichCoordsWithLocality } from '@/lib/geo-enrich';
 import {
+  OWN_HISTORY_COLOR,
+  colorForPeer,
   createPlace,
   deletePlace,
   historySummary,
@@ -13,8 +15,15 @@ import {
   updatePlaceName,
   type HistoryMapPoint,
 } from '@/lib/history';
-import type { PlaceRow } from '@/lib/supabase';
+import { listRelationships, PRIVACY_LABELS } from '@/lib/relationships';
+import {
+  claimPendingKeyPackages,
+  loadPeerHistoryMapPoints,
+} from '@/lib/shares';
+import type { PlaceRow, RelationshipRow } from '@/lib/supabase';
 import { useVault } from '@/lib/vault';
+
+const OVERLAY_KEY = 'ub_history_overlay_people';
 
 function dayOf(iso: string): string {
   return iso.slice(0, 10);
@@ -23,6 +32,7 @@ function dayOf(iso: string): string {
 function sourceLabel(source: HistoryMapPoint['source']): string {
   if (source === 'visit') return 'Place visit';
   if (source === 'trip_start') return 'Trip start';
+  if (source === 'peer_day') return 'Shared day';
   return 'Trip end';
 }
 
@@ -37,21 +47,57 @@ function labelOr(value: string | null | undefined, fallback: string) {
   return trimmed || fallback;
 }
 
-type RankRow = { label: string; days: number };
+function personKey(point: HistoryMapPoint): string {
+  return point.personId ?? 'me';
+}
+
+type PersonSlice = {
+  id: string;
+  name: string;
+  color: string;
+  days: number;
+};
+
+type RankRow = {
+  label: string;
+  days: number;
+  byPerson: PersonSlice[];
+};
 
 function daysByLabel(
   points: HistoryMapPoint[],
   pick: (p: HistoryMapPoint) => string,
 ): RankRow[] {
-  const grouped = new Map<string, Set<string>>();
+  const grouped = new Map<string, Map<string, { name: string; color: string; days: Set<string> }>>();
   for (const point of points) {
     const label = pick(point);
-    const days = grouped.get(label) ?? new Set<string>();
-    days.add(dayOf(point.occurredAt));
-    grouped.set(label, days);
+    const pid = personKey(point);
+    const people = grouped.get(label) ?? new Map();
+    const cur = people.get(pid) ?? {
+      name: point.personName ?? 'You',
+      color: point.color || OWN_HISTORY_COLOR,
+      days: new Set<string>(),
+    };
+    cur.days.add(dayOf(point.occurredAt));
+    people.set(pid, cur);
+    grouped.set(label, people);
   }
   return [...grouped.entries()]
-    .map(([label, days]) => ({ label, days: days.size }))
+    .map(([label, people]) => {
+      const byPerson = [...people.entries()]
+        .map(([id, row]) => ({
+          id,
+          name: row.name,
+          color: row.color,
+          days: row.days.size,
+        }))
+        .sort((a, b) => b.days - a.days);
+      const allDays = new Set<string>();
+      for (const point of points) {
+        if (pick(point) === label) allDays.add(dayOf(point.occurredAt));
+      }
+      return { label, days: allDays.size, byPerson };
+    })
     .sort((a, b) => b.days - a.days || a.label.localeCompare(b.label))
     .slice(0, 12);
 }
@@ -60,10 +106,25 @@ type NamingTarget =
   | { kind: 'point'; point: HistoryMapPoint }
   | { kind: 'place'; place: PlaceRow };
 
+function readOverlayIds(): string[] {
+  try {
+    const raw = localStorage.getItem(OVERLAY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function HistoryPage() {
   const { keys } = useVault();
-  const [points, setPoints] = useState<HistoryMapPoint[]>([]);
+  const [ownPoints, setOwnPoints] = useState<HistoryMapPoint[]>([]);
+  const [peerPoints, setPeerPoints] = useState<HistoryMapPoint[]>([]);
   const [places, setPlaces] = useState<PlaceRow[]>([]);
+  const [people, setPeople] = useState<RelationshipRow[]>([]);
+  const [overlayIds, setOverlayIds] = useState<string[]>([]);
+  const [peerNotes, setPeerNotes] = useState<string[]>([]);
   const [summary, setSummary] = useState<{
     visitCount: number;
     earliest: string | null;
@@ -83,17 +144,43 @@ export default function HistoryPage() {
   const [state, setState] = useState<string | null>(null);
   const [dayFocus, setDayFocus] = useState<string | null>(null);
 
-  async function reload() {
+  const points = useMemo(() => [...ownPoints, ...peerPoints], [ownPoints, peerPoints]);
+
+  const legend = useMemo(() => {
+    const rows = [
+      { id: 'me', name: 'You', color: OWN_HISTORY_COLOR },
+    ];
+    for (const [index, rel] of people.entries()) {
+      if (!overlayIds.includes(rel.id)) continue;
+      rows.push({
+        id: rel.peer_id,
+        name: rel.peer_name,
+        color: colorForPeer(rel.peer_band_color, index),
+      });
+    }
+    return rows;
+  }, [overlayIds, people]);
+
+  async function reloadOwn() {
     if (!keys) return;
     setLoading(true);
     setGeoStatus('');
     try {
-      const [p, pl, s] = await Promise.all([
+      const [p, pl, s, rels] = await Promise.all([
         listHistoryMapPoints(keys),
         listPlaces(keys),
         historySummary(),
+        listRelationships(),
       ]);
-      setPoints(p);
+      const accepted = rels.filter((r) => r.status === 'accepted');
+      setPeople(accepted);
+      const tagged = p.map((row) => ({
+        ...row,
+        personId: null,
+        personName: 'You',
+        color: OWN_HISTORY_COLOR,
+      }));
+      setOwnPoints(tagged);
       setPlaces(pl);
       setSummary(s);
       if (p.length) {
@@ -103,8 +190,15 @@ export default function HistoryPage() {
       setError(null);
 
       setGeoStatus('Looking up city and state labels…');
-      const enriched = await enrichCoordsWithLocality(p);
-      setPoints(enriched);
+      const enriched = await enrichCoordsWithLocality(tagged);
+      setOwnPoints(
+        enriched.map((row) => ({
+          ...row,
+          personId: null,
+          personName: 'You',
+          color: OWN_HISTORY_COLOR,
+        })),
+      );
       setGeoStatus(
         enriched.some((row) => row.city || row.state)
           ? ''
@@ -119,12 +213,88 @@ export default function HistoryPage() {
   }
 
   useEffect(() => {
-    reload();
+    setOverlayIds(readOverlayIds());
+  }, []);
+
+  useEffect(() => {
+    reloadOwn();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keys]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPeers() {
+      if (!keys || overlayIds.length === 0) {
+        setPeerPoints([]);
+        setPeerNotes([]);
+        return;
+      }
+      try {
+        await claimPendingKeyPackages(keys);
+        const notes: string[] = [];
+        const collected: HistoryMapPoint[] = [];
+        for (const [index, rel] of people.entries()) {
+          if (!overlayIds.includes(rel.id)) continue;
+          const color = colorForPeer(rel.peer_band_color, index);
+          const result = await loadPeerHistoryMapPoints({
+            keys,
+            relationshipId: rel.id,
+            peerId: rel.peer_id,
+            peerName: rel.peer_name,
+            theirShares: rel.their_shares,
+            color,
+          });
+          if (result.blockedReason) notes.push(result.blockedReason);
+          collected.push(...result.points);
+        }
+        if (cancelled) return;
+        if (collected.length) {
+          const enriched = await enrichCoordsWithLocality(collected);
+          if (cancelled) return;
+          setPeerPoints(
+            enriched.map((row, i) => ({
+              ...row,
+              personId: collected[i]?.personId,
+              personName: collected[i]?.personName,
+              color: collected[i]?.color,
+              source: 'peer_day' as const,
+            })),
+          );
+        } else {
+          setPeerPoints([]);
+        }
+        setPeerNotes(notes);
+      } catch (e) {
+        if (!cancelled) {
+          setPeerNotes([
+            e instanceof Error ? e.message : 'Could not load connected people.',
+          ]);
+          setPeerPoints([]);
+        }
+      }
+    }
+    void loadPeers();
+    return () => {
+      cancelled = true;
+    };
+  }, [keys, overlayIds, people]);
+
+  function toggleOverlay(id: string) {
+    setOverlayIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      localStorage.setItem(OVERLAY_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
   const firstDay = points[0] ? dayOf(points[0].occurredAt) : '';
-  const lastDay = points.length ? dayOf(points[points.length - 1].occurredAt) : '';
+  const lastDay = points.length
+    ? dayOf(
+        [...points].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))[
+          points.length - 1
+        ]?.occurredAt ?? '',
+      )
+    : '';
 
   const dateFiltered = useMemo(
     () =>
@@ -167,11 +337,17 @@ export default function HistoryPage() {
     () => new Set(filtered.map((p) => dayOf(p.occurredAt))).size,
     [filtered],
   );
-  const visitCount = filtered.filter((p) => p.source === 'visit').length;
-  const tripCount = filtered.filter((p) => p.source !== 'visit').length;
+  const visitCount = filtered.filter(
+    (p) => p.source === 'visit' || p.source === 'peer_day',
+  ).length;
+  const tripCount = filtered.filter(
+    (p) => p.source === 'trip_start' || p.source === 'trip_end',
+  ).length;
 
   const selectedPlace =
-    selected != null ? matchPlace(places, selected.lat, selected.lng) : null;
+    selected != null && !selected.personId
+      ? matchPlace(places, selected.lat, selected.lng)
+      : null;
 
   const cityRows = useMemo(
     () =>
@@ -197,19 +373,33 @@ export default function HistoryPage() {
   const stateMax = Math.max(1, ...stateRows.map((r) => r.days));
 
   const dayBars = useMemo(() => {
-    const grouped = new Map<string, number>();
+    const grouped = new Map<string, Map<string, { color: string; count: number }>>();
     for (const point of filtered) {
       const day = dayOf(point.occurredAt);
-      grouped.set(day, (grouped.get(day) ?? 0) + 1);
+      const pid = personKey(point);
+      const peopleMap = grouped.get(day) ?? new Map();
+      const cur = peopleMap.get(pid) ?? {
+        color: point.color || OWN_HISTORY_COLOR,
+        count: 0,
+      };
+      cur.count += 1;
+      peopleMap.set(pid, cur);
+      grouped.set(day, peopleMap);
     }
     return [...grouped.entries()]
-      .map(([label, count]) => ({ label, count }))
+      .map(([label, peopleMap]) => {
+        const slices = [...peopleMap.values()];
+        const count = slices.reduce((n, s) => n + s.count, 0);
+        return { label, count, slices };
+      })
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [filtered]);
   const dayMax = Math.max(1, ...dayBars.map((r) => r.count));
 
   const listPoints = useMemo(() => {
-    const visits = filtered.filter((p) => p.source === 'visit');
+    const visits = filtered.filter(
+      (p) => p.source === 'visit' || p.source === 'peer_day',
+    );
     return (visits.length ? visits : filtered).slice(0, 120);
   }, [filtered]);
 
@@ -221,6 +411,9 @@ export default function HistoryPage() {
       if (naming.kind === 'place') {
         await updatePlaceName(naming.place.id, placeName);
       } else {
+        if (naming.point.personId) {
+          throw new Error('You can only name your own places.');
+        }
         const existing = matchPlace(places, naming.point.lat, naming.point.lng);
         if (existing) await updatePlaceName(existing.id, placeName);
         else {
@@ -233,7 +426,7 @@ export default function HistoryPage() {
       }
       setNaming(null);
       setPlaceName('');
-      await reload();
+      await reloadOwn();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save place.');
     }
@@ -250,6 +443,7 @@ export default function HistoryPage() {
   }
 
   function openNamePoint(point: HistoryMapPoint) {
+    if (point.personId) return;
     const existing = matchPlace(places, point.lat, point.lng);
     if (existing) {
       setNaming({ kind: 'place', place: existing });
@@ -260,16 +454,122 @@ export default function HistoryPage() {
     }
   }
 
+  function RankBars({
+    rows,
+    max,
+    active,
+    onPick,
+  }: {
+    rows: RankRow[];
+    max: number;
+    active: string | null;
+    onPick: (label: string) => void;
+  }) {
+    if (rows.length === 0) {
+      return <p className="field-help">No labels yet.</p>;
+    }
+    return (
+      <div className="history-day-bars">
+        {rows.map((row) => (
+          <button
+            key={row.label}
+            type="button"
+            className={
+              active === row.label
+                ? 'history-day-bar-row active'
+                : 'history-day-bar-row'
+            }
+            onClick={() => onPick(row.label)}
+          >
+            <span className="history-day-bar-label">{row.label}</span>
+            <div className="history-day-bar-track history-day-bar-track-stack">
+              <div
+                className="history-stack"
+                style={{ width: `${Math.max(4, (row.days / max) * 100)}%` }}
+              >
+                {row.byPerson.map((slice) => (
+                  <span
+                    key={slice.id}
+                    className="history-stack-seg"
+                    title={`${slice.name}: ${slice.days}`}
+                    style={{
+                      flex: slice.days,
+                      background: slice.color,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            <strong>{row.days}</strong>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="panel history-panel">
       <header className="panel-head">
         <h1>Your history</h1>
         <p>
           Visits and trips from your imported timeline, decrypted only on this
-          device. Filter by city or day, inspect a point on the map, and name
-          the places that matter.
+          device. Add connected people to overlay their shared days in their
+          own color.
         </p>
       </header>
+
+      <section className="history-people-card">
+        <h2>People on this map</h2>
+        <p className="field-help">
+          Only people who share city or exact location can appear. Distance-only
+          connections stay off the map.
+        </p>
+        <div className="history-legend">
+          {legend.map((row) => (
+            <span key={row.id} className="history-legend-item">
+              <i style={{ background: row.color }} />
+              {row.name}
+            </span>
+          ))}
+        </div>
+        {people.length === 0 ? (
+          <p className="field-help">
+            No accepted connections yet. Invite someone from People.
+          </p>
+        ) : (
+          <ul className="history-people-toggles">
+            {people.map((rel, index) => {
+              const color = colorForPeer(rel.peer_band_color, index);
+              const on = overlayIds.includes(rel.id);
+              const canMap = rel.their_shares !== 'distance';
+              return (
+                <li key={rel.id}>
+                  <label className={canMap ? undefined : 'is-disabled'}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={!canMap}
+                      onChange={() => toggleOverlay(rel.id)}
+                    />
+                    <i style={{ background: color }} />
+                    <span>
+                      <strong>{rel.peer_name}</strong>
+                      <em>{PRIVACY_LABELS[rel.their_shares]}</em>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {peerNotes.length > 0 ? (
+          <ul className="history-peer-notes">
+            {peerNotes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
 
       <div className="history-filters">
         <label className="fieldset compact-field">
@@ -385,9 +685,8 @@ export default function HistoryPage() {
         <div className="history-map-card-head">
           <h2>Location history heatmap</h2>
           <p>
-            Brighter areas represent more activity. Zoom to neighborhood level
-            to reveal individual, clickable records. Select a city, state, or day
-            below to filter.
+            Each person has their own color. Zoom in for clickable points; filter
+            by city, state, or day below.
           </p>
         </div>
         <div className="history-map-frame">
@@ -403,9 +702,11 @@ export default function HistoryPage() {
               {selected ? (
                 <div className="history-point-card">
                   <strong>
-                    {selectedPlace?.name ??
-                      selected.semanticType ??
-                      sourceLabel(selected.source)}
+                    {selected.personName && selected.personId
+                      ? selected.personName
+                      : selectedPlace?.name ??
+                        selected.semanticType ??
+                        sourceLabel(selected.source)}
                   </strong>
                   <div>{new Date(selected.occurredAt).toLocaleString()}</div>
                   {(selected.city || selected.state) && (
@@ -413,10 +714,8 @@ export default function HistoryPage() {
                       {[selected.city, selected.state].filter(Boolean).join(', ')}
                     </div>
                   )}
-                  {selected.endTime && selected.source === 'visit' ? (
-                    <div className="muted">
-                      Until {new Date(selected.endTime).toLocaleString()}
-                    </div>
+                  {selected.semanticType && selected.personId ? (
+                    <div className="muted">{selected.semanticType}</div>
                   ) : null}
                   <div className="muted">
                     {sourceLabel(selected.source)}
@@ -425,13 +724,17 @@ export default function HistoryPage() {
                   <div className="muted">
                     {selected.lat.toFixed(5)}, {selected.lng.toFixed(5)}
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary history-point-action"
-                    onClick={() => openNamePoint(selected)}
-                  >
-                    {selectedPlace ? 'Rename place' : 'Name this place'}
-                  </button>
+                  {!selected.personId ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary history-point-action"
+                      onClick={() => openNamePoint(selected)}
+                    >
+                      {selectedPlace ? 'Rename place' : 'Name this place'}
+                    </button>
+                  ) : (
+                    <div className="muted">Shared by {selected.personName}</div>
+                  )}
                 </div>
               ) : null}
             </>
@@ -448,75 +751,33 @@ export default function HistoryPage() {
       <div className="history-rank-grid">
         <section className="history-rank-card">
           <h2>Total days in city</h2>
-          <p className="field-help">Select a bar to filter the map and list.</p>
-          <div className="history-day-bars">
-            {cityRows.length === 0 ? (
-              <p className="field-help">No city labels yet.</p>
-            ) : (
-              cityRows.map((row) => (
-                <button
-                  key={row.label}
-                  type="button"
-                  className={
-                    city === row.label
-                      ? 'history-day-bar-row active'
-                      : 'history-day-bar-row'
-                  }
-                  onClick={() => {
-                    setCity((v) => (v === row.label ? null : row.label));
-                    setSelected(null);
-                  }}
-                >
-                  <span className="history-day-bar-label">{row.label}</span>
-                  <div className="history-day-bar-track">
-                    <div
-                      className="history-day-bar-fill"
-                      style={{
-                        width: `${Math.max(4, (row.days / cityMax) * 100)}%`,
-                      }}
-                    />
-                  </div>
-                  <strong>{row.days}</strong>
-                </button>
-              ))
-            )}
-          </div>
+          <p className="field-help">
+            Colored segments show each person. Select a bar to filter.
+          </p>
+          <RankBars
+            rows={cityRows}
+            max={cityMax}
+            active={city}
+            onPick={(label) => {
+              setCity((v) => (v === label ? null : label));
+              setSelected(null);
+            }}
+          />
         </section>
         <section className="history-rank-card">
           <h2>Total days in state</h2>
-          <p className="field-help">Select a bar to filter the map and list.</p>
-          <div className="history-day-bars">
-            {stateRows.length === 0 ? (
-              <p className="field-help">No state labels yet.</p>
-            ) : (
-              stateRows.map((row) => (
-                <button
-                  key={row.label}
-                  type="button"
-                  className={
-                    state === row.label
-                      ? 'history-day-bar-row active'
-                      : 'history-day-bar-row'
-                  }
-                  onClick={() => {
-                    setState((v) => (v === row.label ? null : row.label));
-                    setSelected(null);
-                  }}
-                >
-                  <span className="history-day-bar-label">{row.label}</span>
-                  <div className="history-day-bar-track">
-                    <div
-                      className="history-day-bar-fill"
-                      style={{
-                        width: `${Math.max(4, (row.days / stateMax) * 100)}%`,
-                      }}
-                    />
-                  </div>
-                  <strong>{row.days}</strong>
-                </button>
-              ))
-            )}
-          </div>
+          <p className="field-help">
+            Colored segments show each person. Select a bar to filter.
+          </p>
+          <RankBars
+            rows={stateRows}
+            max={stateMax}
+            active={state}
+            onPick={(label) => {
+              setState((v) => (v === label ? null : label));
+              setSelected(null);
+            }}
+          />
         </section>
       </div>
 
@@ -542,11 +803,21 @@ export default function HistoryPage() {
                 }}
               >
                 <span className="history-day-bar-label">{row.label}</span>
-                <div className="history-day-bar-track">
+                <div className="history-day-bar-track history-day-bar-track-stack">
                   <div
-                    className="history-day-bar-fill"
-                    style={{ width: `${Math.max(4, (row.count / dayMax) * 100)}%` }}
-                  />
+                    className="history-stack"
+                    style={{
+                      width: `${Math.max(4, (row.count / dayMax) * 100)}%`,
+                    }}
+                  >
+                    {row.slices.map((slice, i) => (
+                      <span
+                        key={`${row.label}-${i}`}
+                        className="history-stack-seg"
+                        style={{ flex: slice.count, background: slice.color }}
+                      />
+                    ))}
+                  </div>
                 </div>
                 <strong>{row.count}</strong>
               </button>
@@ -560,14 +831,16 @@ export default function HistoryPage() {
         <p className="field-help">
           {listPoints.length.toLocaleString()} location
           {listPoints.length === 1 ? '' : 's'} matching the current filters.
-          Select one to highlight it on the map, then rename it.
         </p>
         {listPoints.length === 0 ? (
           <p className="field-help">No locations in this filter.</p>
         ) : (
           <ul className="visit-list">
             {listPoints.map((point) => {
-              const place = matchPlace(places, point.lat, point.lng);
+              const place =
+                !point.personId
+                  ? matchPlace(places, point.lat, point.lng)
+                  : null;
               return (
                 <li
                   key={point.id}
@@ -579,25 +852,36 @@ export default function HistoryPage() {
                     onClick={() => setSelected(point)}
                   >
                     <strong>
-                      {place?.name ??
-                        point.semanticType ??
-                        sourceLabel(point.source)}
+                      <i
+                        className="history-loc-swatch"
+                        style={{ background: point.color || OWN_HISTORY_COLOR }}
+                      />
+                      {point.personName && point.personId
+                        ? `${point.personName}`
+                        : place?.name ??
+                          point.semanticType ??
+                          sourceLabel(point.source)}
                     </strong>
                     <span className="muted">
                       {new Date(point.occurredAt).toLocaleString()}
                       {point.city || point.state
                         ? ` · ${[point.city, point.state].filter(Boolean).join(', ')}`
                         : ''}
+                      {point.semanticType && point.personId
+                        ? ` · ${point.semanticType}`
+                        : ''}
                       {` · ${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`}
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    className="btn-quiet"
-                    onClick={() => openNamePoint(point)}
-                  >
-                    {place ? 'Rename' : 'Name'}
-                  </button>
+                  {!point.personId ? (
+                    <button
+                      type="button"
+                      className="btn-quiet"
+                      onClick={() => openNamePoint(point)}
+                    >
+                      {place ? 'Rename' : 'Name'}
+                    </button>
+                  ) : null}
                 </li>
               );
             })}
@@ -633,7 +917,7 @@ export default function HistoryPage() {
                     className="btn-quiet"
                     onClick={async () => {
                       await deletePlace(p.id);
-                      await reload();
+                      await reloadOwn();
                     }}
                   >
                     Remove

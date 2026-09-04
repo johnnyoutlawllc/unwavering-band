@@ -12,7 +12,7 @@ export type DecryptedVisit = VisitSegment & {
 /** One map-ready coordinate from Timeline (visit center or trip endpoint). */
 export type HistoryMapPoint = {
   id: string;
-  source: 'visit' | 'trip_start' | 'trip_end';
+  source: 'visit' | 'trip_start' | 'trip_end' | 'peer_day';
   occurredAt: string;
   endTime: string | null;
   lat: number;
@@ -24,7 +24,30 @@ export type HistoryMapPoint = {
   city?: string | null;
   state?: string | null;
   country?: string | null;
+  /** null / omitted = you */
+  personId?: string | null;
+  personName?: string | null;
+  color?: string | null;
 };
+
+export const OWN_HISTORY_COLOR = '#ffb347';
+
+export const PEER_HISTORY_PALETTE = [
+  '#6ee7ff',
+  '#a78bfa',
+  '#7dffb0',
+  '#ff6b8b',
+  '#60a5fa',
+  '#f472b6',
+];
+
+export function colorForPeer(
+  bandColor: string | null | undefined,
+  index: number,
+): string {
+  if (bandColor && /^#[0-9a-fA-F]{6}$/.test(bandColor)) return bandColor;
+  return PEER_HISTORY_PALETTE[index % PEER_HISTORY_PALETTE.length];
+}
 
 export async function listRecentVisits(
   keys: VaultKeys,

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { HistoryMapPoint } from '@/lib/history';
+import { OWN_HISTORY_COLOR } from '@/lib/history';
 import type { PlaceRow } from '@/lib/supabase';
 import 'leaflet/dist/leaflet.css';
 
@@ -168,6 +169,8 @@ function paintMap(
     ) {
       continue;
     }
+    const hex = point.color || OWN_HISTORY_COLOR;
+    const rgb = hexToRgb(hex);
     const gradient = context.createRadialGradient(
       pixel.x,
       pixel.y,
@@ -176,10 +179,10 @@ function paintMap(
       pixel.y,
       radius,
     );
-    gradient.addColorStop(0, 'rgba(255,244,158,.24)');
-    gradient.addColorStop(0.32, 'rgba(255,179,71,.16)');
-    gradient.addColorStop(0.68, 'rgba(167,139,250,.10)');
-    gradient.addColorStop(1, 'rgba(90,22,120,0)');
+    gradient.addColorStop(0, `rgba(${rgb},.28)`);
+    gradient.addColorStop(0.35, `rgba(${rgb},.16)`);
+    gradient.addColorStop(0.7, `rgba(${rgb},.08)`);
+    gradient.addColorStop(1, `rgba(${rgb},0)`);
     context.fillStyle = gradient;
     context.fillRect(pixel.x - radius, pixel.y - radius, radius * 2, radius * 2);
   }
@@ -192,11 +195,12 @@ function paintMap(
       const latLng = L.latLng(point.lat, point.lng);
       if (!visible.contains(latLng)) continue;
       const selected = point.id === selectedId;
+      const fill = point.color || '#f1f1f1';
       L.circleMarker(latLng, {
         radius: selected ? 7 : 4,
-        color: selected ? '#ffb347' : 'rgba(255,255,255,.9)',
+        color: selected ? fill : 'rgba(255,255,255,.9)',
         weight: selected ? 2 : 1,
-        fillColor: selected ? '#ffb347' : '#f1f1f1',
+        fillColor: fill,
         fillOpacity: 0.95,
       })
         .addTo(detailLayer)
@@ -221,6 +225,14 @@ function paintMap(
       }),
     }).addTo(placeLayer);
   }
+}
+
+function hexToRgb(hex: string): string {
+  const raw = hex.replace('#', '');
+  if (raw.length !== 6) return '255,179,71';
+  const n = Number.parseInt(raw, 16);
+  if (!Number.isFinite(n)) return '255,179,71';
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
 }
 
 function escapeHtml(value: string): string {

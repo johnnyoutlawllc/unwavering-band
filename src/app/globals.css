@@ -1338,10 +1338,115 @@ select.input {
   overflow: hidden;
 }
 
+.history-day-bar-track-stack {
+  height: 0.55rem;
+}
+
 .history-day-bar-fill {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, rgba(255, 179, 71, 0.7), rgba(167, 139, 250, 0.75));
+}
+
+.history-stack {
+  display: flex;
+  height: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  min-width: 4%;
+}
+
+.history-stack-seg {
+  display: block;
+  min-width: 2px;
+  height: 100%;
+}
+
+.history-people-card {
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1.25rem;
+  background: rgba(8, 8, 18, 0.45);
+}
+
+.history-people-card h2 {
+  margin: 0 0 0.25rem;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 300;
+  font-size: 1.15rem;
+}
+
+.history-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  margin: 0.75rem 0;
+}
+
+.history-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--dim);
+}
+
+.history-legend-item i,
+.history-people-toggles i,
+.history-loc-swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.history-people-toggles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.history-people-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.history-people-toggles label.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.history-people-toggles span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.history-people-toggles em {
+  font-style: normal;
+  font-size: 0.75rem;
+  color: var(--dimmer);
+}
+
+.history-peer-notes {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--dimmer);
+  font-size: 0.8rem;
+}
+
+.history-loc-main strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .history-day-bar-row strong {

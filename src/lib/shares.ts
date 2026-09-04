@@ -238,6 +238,74 @@ export async function loadDistanceReport(
   return (data ?? []) as DistanceReportRow[];
 }
 
+/**
+ * Peer daily positions for the History map. Only city/exact tiers return
+ * coordinates (distance-only stays off the map).
+ */
+export async function loadPeerHistoryMapPoints(opts: {
+  keys: VaultKeys;
+  relationshipId: string;
+  peerId: string;
+  peerName: string;
+  theirShares: PrivacyTier;
+  color: string;
+}): Promise<{ points: import('./history').HistoryMapPoint[]; blockedReason: string | null }> {
+  if (opts.theirShares === 'distance') {
+    return {
+      points: [],
+      blockedReason: `${opts.peerName} shares distance only, so their locations stay hidden.`,
+    };
+  }
+
+  const relKey = await loadRelKey(opts.keys, opts.relationshipId);
+  if (!relKey) {
+    return {
+      points: [],
+      blockedReason: `Relationship key not ready for ${opts.peerName}. Open People and accept/unlock first.`,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from('relationship_daily_shares')
+    .select('day, payload_cipher, tier')
+    .eq('relationship_id', opts.relationshipId)
+    .eq('author_id', opts.peerId)
+    .order('day', { ascending: true });
+  if (error) throw error;
+
+  const points: import('./history').HistoryMapPoint[] = [];
+  for (const row of data ?? []) {
+    const tier = row.tier as PrivacyTier;
+    if (tier === 'distance') continue;
+    const payload = await decryptJson<CoordPayload>(relKey, row.payload_cipher);
+    const coords = visibleCoords(tier, payload.lat, payload.lng);
+    if (coords.lat == null || coords.lng == null) continue;
+    points.push({
+      id: `peer:${opts.relationshipId}:${row.day}`,
+      source: 'peer_day',
+      occurredAt: `${row.day}T12:00:00.000Z`,
+      endTime: null,
+      lat: coords.lat,
+      lng: coords.lng,
+      semanticType: visiblePlace(tier, payload.place),
+      activityType: null,
+      placeId: null,
+      distanceMeters: null,
+      personId: opts.peerId,
+      personName: opts.peerName,
+      color: opts.color,
+    });
+  }
+
+  return {
+    points,
+    blockedReason:
+      points.length === 0
+        ? `${opts.peerName} has not published shared days yet. Ask them to open People once while unlocked.`
+        : null,
+  };
+}
+
 export function reportRowsToPoints(
   rows: DistanceReportRow[],
   myUserId: string,

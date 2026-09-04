@@ -1,7 +1,9 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { HistoryHeatmap, type MapBounds } from '@/components/HistoryHeatmap';
+import { FormEvent, useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { DistanceChart } from '@/components/DistanceChart';
+import { HistoryHeatmap, type HistoryBasemap, type MapBounds } from '@/components/HistoryHeatmap';
+import { useAuth } from '@/lib/auth';
 import { enrichCoordsWithLocality } from '@/lib/geo-enrich';
 import {
   OWN_HISTORY_COLOR,
@@ -18,16 +20,27 @@ import {
 import { listRelationships, PRIVACY_LABELS } from '@/lib/relationships';
 import {
   claimPendingKeyPackages,
+  ensureDistanceReport,
   loadPeerHistoryMapPoints,
 } from '@/lib/shares';
-import type { PlaceRow, RelationshipRow } from '@/lib/supabase';
+import type {
+  DistancePoint,
+  PlaceRow,
+  RelationshipRow,
+} from '@/lib/supabase';
 import { useVault } from '@/lib/vault';
 
 const OVERLAY_KEY = 'ub_history_overlay_people';
 const COLORS_KEY = 'ub_history_person_colors';
 const MAP_MODE_KEY = 'ub_history_map_mode';
+const BASEMAP_KEY = 'ub_history_basemap';
+const MAP_HEIGHT_KEY = 'ub_history_map_height';
 
 type MapMode = 'shared' | 'split';
+
+const DEFAULT_MAP_HEIGHT = 520;
+const MIN_MAP_HEIGHT = 280;
+const MAX_MAP_HEIGHT = 900;
 
 function dayOf(iso: string): string {
   return iso.slice(0, 10);
@@ -143,6 +156,7 @@ function readJson<T>(key: string, fallback: T): T {
 
 export default function HistoryPage() {
   const { keys } = useVault();
+  const { user, displayName } = useAuth();
   const [ownPoints, setOwnPoints] = useState<HistoryMapPoint[]>([]);
   const [peerPoints, setPeerPoints] = useState<HistoryMapPoint[]>([]);
   const [places, setPlaces] = useState<PlaceRow[]>([]);
@@ -150,7 +164,14 @@ export default function HistoryPage() {
   const [overlayIds, setOverlayIds] = useState<string[]>([]);
   const [personColors, setPersonColors] = useState<Record<string, string>>({});
   const [mapMode, setMapMode] = useState<MapMode>('shared');
+  const [basemap, setBasemap] = useState<HistoryBasemap>('street');
+  const [mapHeight, setMapHeight] = useState(DEFAULT_MAP_HEIGHT);
   const [peerNotes, setPeerNotes] = useState<string[]>([]);
+  const [distanceByRel, setDistanceByRel] = useState<
+    Record<string, DistancePoint[]>
+  >({});
+  const [distanceRelId, setDistanceRelId] = useState<string | null>(null);
+  const [distanceStatus, setDistanceStatus] = useState('');
   const [summary, setSummary] = useState<{
     visitCount: number;
     earliest: string | null;
@@ -261,6 +282,14 @@ export default function HistoryPage() {
     setPersonColors(colors && typeof colors === 'object' ? colors : {});
     const mode = readJson<MapMode>(MAP_MODE_KEY, 'shared');
     setMapMode(mode === 'split' ? 'split' : 'shared');
+    const layer = readJson<HistoryBasemap>(BASEMAP_KEY, 'street');
+    setBasemap(layer === 'satellite' ? 'satellite' : 'street');
+    const height = Number(localStorage.getItem(MAP_HEIGHT_KEY));
+    if (Number.isFinite(height)) {
+      setMapHeight(
+        Math.min(MAX_MAP_HEIGHT, Math.max(MIN_MAP_HEIGHT, Math.round(height))),
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -349,6 +378,40 @@ export default function HistoryPage() {
     localStorage.setItem(MAP_MODE_KEY, JSON.stringify(mode));
   }
 
+  function setBasemapPersist(layer: HistoryBasemap) {
+    setBasemap(layer);
+    localStorage.setItem(BASEMAP_KEY, JSON.stringify(layer));
+  }
+
+  function startMapResize(e: ReactPointerEvent<HTMLButtonElement>) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = mapHeight;
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+
+    function onMove(ev: PointerEvent) {
+      const next = Math.min(
+        MAX_MAP_HEIGHT,
+        Math.max(MIN_MAP_HEIGHT, Math.round(startHeight + (ev.clientY - startY))),
+      );
+      setMapHeight(next);
+    }
+
+    function onUp(ev: PointerEvent) {
+      target.releasePointerCapture(ev.pointerId);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setMapHeight((current) => {
+        localStorage.setItem(MAP_HEIGHT_KEY, String(current));
+        return current;
+      });
+    }
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
   const sorted = useMemo(
     () => [...points].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)),
     [points],
@@ -378,14 +441,93 @@ export default function HistoryPage() {
 
   const bounds = useMemo(() => boundsFor(filtered), [filtered]);
 
+  // Split maps share one viewport from the active filters so both people
+  // stay locked to the same region (even if one has fewer points there).
   const mapSeries = useMemo(() => {
-    return legend
-      .map((row) => {
-        const pts = filtered.filter((p) => personKey(p) === row.id);
-        return { ...row, points: pts, bounds: boundsFor(pts) };
-      })
-      .filter((row) => row.points.length > 0);
+    return legend.map((row) => ({
+      ...row,
+      points: filtered.filter((p) => personKey(p) === row.id),
+    }));
   }, [filtered, legend]);
+
+  const overlayPeople = useMemo(
+    () => people.filter((rel) => overlayIds.includes(rel.id)),
+    [overlayIds, people],
+  );
+
+  useEffect(() => {
+    if (overlayPeople.length === 0) {
+      setDistanceRelId(null);
+      return;
+    }
+    setDistanceRelId((prev) =>
+      prev && overlayPeople.some((r) => r.id === prev)
+        ? prev
+        : overlayPeople[0].id,
+    );
+  }, [overlayPeople]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDistance() {
+      if (!keys || !user || overlayPeople.length === 0) {
+        setDistanceByRel({});
+        setDistanceStatus('');
+        return;
+      }
+      setDistanceStatus('Loading distance timeline…');
+      try {
+        await claimPendingKeyPackages(keys);
+        const placesForReport = await listPlaces(keys);
+        const next: Record<string, DistancePoint[]> = {};
+        for (const rel of overlayPeople) {
+          const result = await ensureDistanceReport({
+            keys,
+            relationshipId: rel.id,
+            peerId: rel.peer_id,
+            peerName: rel.peer_name,
+            myName: displayName ?? 'You',
+            iAmRequester: rel.i_am_requester,
+            myShares: rel.my_shares,
+            places: placesForReport,
+          });
+          if (cancelled) return;
+          next[rel.id] = result.points;
+        }
+        if (cancelled) return;
+        setDistanceByRel(next);
+        setDistanceStatus('');
+      } catch (e) {
+        if (!cancelled) {
+          setDistanceStatus(
+            e instanceof Error ? e.message : 'Could not load distance timeline.',
+          );
+        }
+      }
+    }
+    void loadDistance();
+    return () => {
+      cancelled = true;
+    };
+  }, [displayName, keys, overlayPeople, user]);
+
+  const activeDistanceRel =
+    overlayPeople.find((r) => r.id === distanceRelId) ?? overlayPeople[0] ?? null;
+  const distancePoints = useMemo(() => {
+    if (!activeDistanceRel) return [];
+    const all = distanceByRel[activeDistanceRel.id] ?? [];
+    return all.filter(
+      (pt) => (!from || pt.day >= from) && (!to || pt.day <= to),
+    );
+  }, [activeDistanceRel, distanceByRel, from, to]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const el = document.querySelector(
+      `.history-locations-list li.is-selected`,
+    );
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [selected?.id]);
 
   const uniqueDays = useMemo(
     () => new Set(filtered.map((p) => dayOf(p.occurredAt))).size,
@@ -858,13 +1000,31 @@ export default function HistoryPage() {
           {mapMode === 'shared' ? (
             <section className="history-map-card">
               <div className="history-map-card-head">
-                <h2>Location history heatmap</h2>
+                <div className="history-map-card-title-row">
+                  <h2>Location history heatmap</h2>
+                  <div className="history-mode-toggle" role="group" aria-label="Map style">
+                    <button
+                      type="button"
+                      className={basemap === 'street' ? 'is-active' : undefined}
+                      onClick={() => setBasemapPersist('street')}
+                    >
+                      Street
+                    </button>
+                    <button
+                      type="button"
+                      className={basemap === 'satellite' ? 'is-active' : undefined}
+                      onClick={() => setBasemapPersist('satellite')}
+                    >
+                      Satellite
+                    </button>
+                  </div>
+                </div>
                 <p>
                   Shared view. Click a location beside the map, or a city or
-                  state below, to zoom and filter.
+                  state below, to zoom and filter. Drag the corner to resize.
                 </p>
               </div>
-              <div className="history-map-frame">
+              <div className="history-map-frame" style={{ height: mapHeight }}>
                 {bounds ? (
                   <>
                     <HistoryHeatmap
@@ -873,9 +1033,17 @@ export default function HistoryPage() {
                       bounds={bounds}
                       selectedId={selected?.id ?? null}
                       focusPoint={selected}
+                      basemap={basemap}
                       onSelect={selectAndFocus}
                     />
                     <PointCard />
+                    <button
+                      type="button"
+                      className="history-map-resize"
+                      aria-label="Resize map"
+                      title="Drag to resize map"
+                      onPointerDown={startMapResize}
+                    />
                   </>
                 ) : (
                   <div className="history-map-empty">
@@ -888,13 +1056,40 @@ export default function HistoryPage() {
             </section>
           ) : (
             <div className="history-split-maps">
-              {mapSeries.length === 0 ? (
+              {!bounds || mapSeries.length === 0 ? (
                 <div className="history-map-empty">
                   No locations match the selected filters.
                 </div>
               ) : (
-                mapSeries.map((series) =>
-                  series.bounds ? (
+                <>
+                  <div className="history-map-card-head history-split-basemap">
+                    <p className="field-help" style={{ margin: 0, flex: 1 }}>
+                      Both maps stay locked to the same filtered region.
+                    </p>
+                    <div
+                      className="history-mode-toggle"
+                      role="group"
+                      aria-label="Map style"
+                    >
+                      <button
+                        type="button"
+                        className={basemap === 'street' ? 'is-active' : undefined}
+                        onClick={() => setBasemapPersist('street')}
+                      >
+                        Street
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          basemap === 'satellite' ? 'is-active' : undefined
+                        }
+                        onClick={() => setBasemapPersist('satellite')}
+                      >
+                        Satellite
+                      </button>
+                    </div>
+                  </div>
+                  {mapSeries.map((series) => (
                     <section key={series.id} className="history-map-card">
                       <div className="history-map-card-head">
                         <h2>
@@ -905,30 +1100,51 @@ export default function HistoryPage() {
                           {series.name}
                         </h2>
                         <p>
-                          {series.points.length.toLocaleString()} points in the
+                          {series.points.length.toLocaleString()} point
+                          {series.points.length === 1 ? '' : 's'} in the
                           current filters.
                         </p>
                       </div>
-                      <div className="history-map-frame history-map-frame-split">
+                      <div
+                        className="history-map-frame history-map-frame-split"
+                        style={{
+                          height: Math.max(
+                            240,
+                            Math.round(
+                              mapHeight /
+                                Math.max(1, Math.min(mapSeries.length, 2)),
+                            ),
+                          ),
+                        }}
+                      >
                         <HistoryHeatmap
                           points={series.points}
                           places={series.id === 'me' ? places : []}
-                          bounds={series.bounds}
+                          bounds={bounds}
                           selectedId={selected?.id ?? null}
-                          focusPoint={
-                            selected && personKey(selected) === series.id
-                              ? selected
-                              : null
-                          }
+                          focusPoint={selected}
+                          basemap={basemap}
                           onSelect={selectAndFocus}
                         />
+                        {series.points.length === 0 ? (
+                          <div className="history-map-empty history-map-empty-overlay">
+                            No points for {series.name} in this filter.
+                          </div>
+                        ) : null}
                         {selected && personKey(selected) === series.id ? (
                           <PointCard />
                         ) : null}
+                        <button
+                          type="button"
+                          className="history-map-resize"
+                          aria-label="Resize map"
+                          title="Drag to resize map"
+                          onPointerDown={startMapResize}
+                        />
                       </div>
                     </section>
-                  ) : null,
-                )
+                  ))}
+                </>
               )}
             </div>
           )}
@@ -1001,6 +1217,64 @@ export default function HistoryPage() {
           )}
         </aside>
       </div>
+
+      {overlayPeople.length > 0 ? (
+        <section className="history-distance-card">
+          <div className="history-map-card-title-row">
+            <div>
+              <h2>Distance over time</h2>
+              <p className="field-help">
+                How far apart you were on overlapping visit days. Click a point
+                to focus that day on the maps above.
+              </p>
+            </div>
+            {overlayPeople.length > 1 ? (
+              <div className="history-mode-toggle" role="group" aria-label="Person">
+                {overlayPeople.map((rel) => (
+                  <button
+                    key={rel.id}
+                    type="button"
+                    className={
+                      activeDistanceRel?.id === rel.id ? 'is-active' : undefined
+                    }
+                    onClick={() => setDistanceRelId(rel.id)}
+                  >
+                    {rel.peer_name}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {distanceStatus ? (
+            <p className="field-help">{distanceStatus}</p>
+          ) : null}
+          {activeDistanceRel ? (
+            <DistanceChart
+              points={distancePoints}
+              peerName={activeDistanceRel.peer_name}
+              activeDay={dayFocus}
+              onSelectDay={(day) => {
+                setDayFocus((v) => (v === day ? null : day));
+                setSelected(null);
+              }}
+            />
+          ) : null}
+          {distancePoints.length > 0 ? (
+            <p className="field-help">
+              {distancePoints.length.toLocaleString()} overlapping days in this
+              date range · closest{' '}
+              {Math.min(
+                ...distancePoints.map((p) => p.distance_km * 0.621371),
+              ).toFixed(1)}{' '}
+              mi · farthest{' '}
+              {Math.max(
+                ...distancePoints.map((p) => p.distance_km * 0.621371),
+              ).toFixed(0)}{' '}
+              mi
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <div className="history-rank-grid">
         <section className="history-rank-card">

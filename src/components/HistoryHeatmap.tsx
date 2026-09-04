@@ -13,12 +13,15 @@ export type MapBounds = {
   east: number;
 };
 
+export type HistoryBasemap = 'street' | 'satellite';
+
 type Props = {
   points: HistoryMapPoint[];
   places: PlaceRow[];
   bounds: MapBounds;
   selectedId: string | null;
   focusPoint?: HistoryMapPoint | null;
+  basemap?: HistoryBasemap;
   onSelect: (point: HistoryMapPoint) => void;
 };
 
@@ -31,6 +34,8 @@ type MapHandle = {
   detailLayer: import('leaflet').LayerGroup;
   placeLayer: import('leaflet').LayerGroup;
   selectedLayer: import('leaflet').LayerGroup;
+  streetLayer: import('leaflet').TileLayer;
+  satelliteLayer: import('leaflet').TileLayer;
 };
 
 export function HistoryHeatmap({
@@ -39,17 +44,20 @@ export function HistoryHeatmap({
   bounds,
   selectedId,
   focusPoint = null,
+  basemap = 'street',
   onSelect,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<MapHandle | null>(null);
   const onSelectRef = useRef(onSelect);
   const selectedIdRef = useRef(selectedId);
+  const focusPointRef = useRef(focusPoint);
   const pointsRef = useRef(points);
   const placesRef = useRef(places);
   const boundsRef = useRef(bounds);
   onSelectRef.current = onSelect;
   selectedIdRef.current = selectedId;
+  focusPointRef.current = focusPoint;
   pointsRef.current = points;
   placesRef.current = places;
   boundsRef.current = bounds;
@@ -58,6 +66,7 @@ export function HistoryHeatmap({
     if (!containerRef.current) return;
     let disposed = false;
     let map: import('leaflet').Map | null = null;
+    let observer: ResizeObserver | null = null;
 
     void import('leaflet').then((L) => {
       if (disposed || !containerRef.current) return;
@@ -68,11 +77,25 @@ export function HistoryHeatmap({
         attributionControl: true,
       });
 
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19,
-      }).addTo(map);
+      const streetLayer = L.tileLayer(
+        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+          maxZoom: 19,
+        },
+      );
+
+      const satelliteLayer = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        {
+          attribution:
+            'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+          maxZoom: 19,
+        },
+      );
+
+      streetLayer.addTo(map);
 
       const canvas = L.DomUtil.create(
         'canvas',
@@ -89,6 +112,8 @@ export function HistoryHeatmap({
         detailLayer,
         placeLayer,
         selectedLayer,
+        streetLayer,
+        satelliteLayer,
       };
       handleRef.current = handle;
 
@@ -98,11 +123,18 @@ export function HistoryHeatmap({
           pointsRef.current,
           placesRef.current,
           selectedIdRef.current,
+          focusPointRef.current,
           onSelectRef.current,
         );
       };
 
       map.on('moveend zoomend resize', redraw);
+      observer = new ResizeObserver(() => {
+        map?.invalidateSize({ animate: false });
+        redraw();
+      });
+      observer.observe(containerRef.current);
+
       const b = boundsRef.current;
       map.fitBounds(
         [
@@ -116,10 +148,31 @@ export function HistoryHeatmap({
 
     return () => {
       disposed = true;
+      observer?.disconnect();
       map?.remove();
       handleRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const handle = handleRef.current;
+    if (!handle) return;
+    if (basemap === 'satellite') {
+      if (handle.map.hasLayer(handle.streetLayer)) {
+        handle.map.removeLayer(handle.streetLayer);
+      }
+      if (!handle.map.hasLayer(handle.satelliteLayer)) {
+        handle.satelliteLayer.addTo(handle.map);
+      }
+    } else {
+      if (handle.map.hasLayer(handle.satelliteLayer)) {
+        handle.map.removeLayer(handle.satelliteLayer);
+      }
+      if (!handle.map.hasLayer(handle.streetLayer)) {
+        handle.streetLayer.addTo(handle.map);
+      }
+    }
+  }, [basemap]);
 
   useEffect(() => {
     const handle = handleRef.current;
@@ -144,8 +197,8 @@ export function HistoryHeatmap({
   useEffect(() => {
     const handle = handleRef.current;
     if (!handle) return;
-    paintMap(handle, points, places, selectedId, onSelect);
-  }, [points, places, selectedId, onSelect]);
+    paintMap(handle, points, places, selectedId, focusPoint, onSelect);
+  }, [points, places, selectedId, focusPoint, onSelect]);
 
   return (
     <div
@@ -161,6 +214,7 @@ function paintMap(
   points: HistoryMapPoint[],
   places: PlaceRow[],
   selectedId: string | null,
+  focusPoint: HistoryMapPoint | null | undefined,
   onSelect: (point: HistoryMapPoint) => void,
 ) {
   const { L, map, canvas, detailLayer, placeLayer, selectedLayer } = handle;
@@ -228,12 +282,15 @@ function paintMap(
   }
 
   selectedLayer.clearLayers();
-  const selected = selectedId
-    ? points.find((point) => point.id === selectedId)
-    : null;
+  const selected =
+    (selectedId ? points.find((point) => point.id === selectedId) : null) ??
+    (focusPoint && focusPoint.id === selectedId ? focusPoint : null) ??
+    focusPoint ??
+    null;
   if (selected) {
     const fill = selected.color || OWN_HISTORY_COLOR;
     const latLng = L.latLng(selected.lat, selected.lng);
+    const inSeries = points.some((point) => point.id === selected.id);
     L.circleMarker(latLng, {
       radius: 11,
       color: '#fff',
@@ -241,15 +298,16 @@ function paintMap(
       fillColor: fill,
       fillOpacity: 0.2,
     }).addTo(selectedLayer);
-    L.circleMarker(latLng, {
+    const marker = L.circleMarker(latLng, {
       radius: 7,
       color: '#fff',
       weight: 2,
       fillColor: fill,
       fillOpacity: 1,
-    })
-      .addTo(selectedLayer)
-      .on('click', () => onSelect(selected));
+    }).addTo(selectedLayer);
+    if (inSeries) {
+      marker.on('click', () => onSelect(selected));
+    }
   }
 
   placeLayer.clearLayers();

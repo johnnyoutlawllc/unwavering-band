@@ -7,9 +7,16 @@ import type { DistancePoint } from '@/lib/supabase';
 type Props = {
   points: DistancePoint[];
   peerName: string;
+  onSelectDay?: (day: string) => void;
+  activeDay?: string | null;
 };
 
-export function DistanceChart({ points, peerName }: Props) {
+export function DistanceChart({
+  points,
+  peerName,
+  onSelectDay,
+  activeDay = null,
+}: Props) {
   const [hover, setHover] = useState<number | null>(null);
 
   const { maxKm, path, width, height, pad } = useMemo(() => {
@@ -20,7 +27,8 @@ export function DistanceChart({ points, peerName }: Props) {
     const innerW = w - p.left - p.right;
     const innerH = h - p.top - p.bottom;
     const coords = points.map((pt, i) => {
-      const x = p.left + (points.length <= 1 ? innerW / 2 : (i / (points.length - 1)) * innerW);
+      const x =
+        p.left + (points.length <= 1 ? innerW / 2 : (i / (points.length - 1)) * innerW);
       const y = p.top + innerH - (pt.distance_km / max) * innerH;
       return { x, y };
     });
@@ -39,10 +47,15 @@ export function DistanceChart({ points, peerName }: Props) {
     );
   }
 
-  const active = hover !== null ? points[hover] : null;
+  const activeIndex =
+    hover ??
+    (activeDay ? points.findIndex((pt) => pt.day === activeDay) : -1);
+  const active = activeIndex >= 0 ? points[activeIndex] : null;
   const tip = active
     ? buildTip(active, peerName)
-    : 'Hover the line to see what their privacy allows.';
+    : onSelectDay
+      ? 'Click a point to focus that day on the map.'
+      : 'Hover the line to see what their privacy allows.';
 
   return (
     <div className="chart-wrap">
@@ -89,14 +102,17 @@ export function DistanceChart({ points, peerName }: Props) {
             pad.top +
             (height - pad.top - pad.bottom) -
             (pt.distance_km / maxKm) * (height - pad.top - pad.bottom);
+          const isActive = activeIndex === i;
           return (
             <circle
               key={pt.day}
-              className={hover === i ? 'chart-dot active' : 'chart-dot'}
+              className={isActive ? 'chart-dot active' : 'chart-dot'}
               cx={x}
               cy={y}
-              r={hover === i ? 5 : 3.5}
+              r={isActive ? 5 : 3.5}
+              style={{ cursor: onSelectDay ? 'pointer' : undefined }}
               onMouseEnter={() => setHover(i)}
+              onClick={() => onSelectDay?.(pt.day)}
             />
           );
         })}

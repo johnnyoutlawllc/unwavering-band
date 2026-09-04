@@ -969,6 +969,12 @@ button:disabled {
   padding: 1.5rem 1.25rem 3rem;
 }
 
+.app-main:has(.history-panel) {
+  max-width: min(1600px, 100%);
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
 .app-loading {
   position: relative;
   z-index: 2;
@@ -1183,7 +1189,8 @@ select.input {
 /* ---------- history map ---------- */
 
 .history-panel {
-  max-width: 68rem;
+  max-width: none;
+  width: 100%;
 }
 
 .history-filters {
@@ -1206,7 +1213,7 @@ select.input {
 
 .history-map-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(260px, 0.9fr);
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.95fr);
   gap: 1rem;
   align-items: stretch;
   margin-top: 0.25rem;
@@ -1214,6 +1221,9 @@ select.input {
 
 .history-map-main {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .history-locations-side {
@@ -1224,7 +1234,9 @@ select.input {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  max-height: min(560px, 70vh);
+  height: 100%;
+  max-height: none;
+  align-self: stretch;
 }
 
 .history-locations-side h2 {
@@ -1252,7 +1264,48 @@ select.input {
 
   .history-locations-side {
     max-height: min(420px, 55vh);
+    height: auto;
   }
+}
+
+.history-map-empty-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  background: rgba(8, 8, 18, 0.55);
+  pointer-events: none;
+  z-index: 400;
+}
+
+.history-distance-card {
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  padding: 1rem 1.1rem 1.15rem;
+  margin: 1.25rem 0;
+  background: rgba(8, 8, 18, 0.5);
+}
+
+.history-distance-card h2 {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 300;
+  font-size: 1.2rem;
+}
+
+.history-distance-card > .field-help {
+  margin-top: 0.35rem;
+}
+
+.history-split-basemap {
+  grid-column: 1 / -1;
+  padding: 0 0 0.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem 1rem;
 }
 
 .history-map-card {
@@ -1283,6 +1336,46 @@ select.input {
   position: relative;
   height: min(520px, 70vh);
   background: #0a0a12;
+}
+
+.history-map-card-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+}
+
+.history-map-resize {
+  position: absolute;
+  z-index: 600;
+  right: 0.35rem;
+  bottom: 0.35rem;
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  cursor: ns-resize;
+  background:
+    linear-gradient(
+      135deg,
+      transparent 0 42%,
+      rgba(244, 241, 234, 0.35) 42% 48%,
+      transparent 48% 58%,
+      rgba(244, 241, 234, 0.55) 58% 64%,
+      transparent 64% 74%,
+      rgba(244, 241, 234, 0.75) 74% 80%,
+      transparent 80%
+    ),
+    rgba(10, 10, 18, 0.55);
+  touch-action: none;
+}
+
+.history-map-resize:hover,
+.history-map-resize:focus-visible {
+  background-color: rgba(255, 179, 71, 0.25);
+  outline: 1px solid rgba(255, 179, 71, 0.45);
 }
 
 .history-leaflet-map {
@@ -1522,10 +1615,6 @@ select.input {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1rem;
   margin-top: 0.25rem;
-}
-
-.history-map-frame-split {
-  height: min(360px, 55vh);
 }
 
 .history-map-card-head h2 {

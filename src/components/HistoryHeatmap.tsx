@@ -36,7 +36,13 @@ type MapHandle = {
   selectedLayer: import('leaflet').LayerGroup;
   streetLayer: import('leaflet').TileLayer;
   satelliteLayer: import('leaflet').TileLayer;
+  labelsLayer: import('leaflet').LayerGroup;
+  placesLabels: import('leaflet').TileLayer;
+  roadsLabels: import('leaflet').TileLayer;
+  basemap: HistoryBasemap;
 };
+
+const LABEL_MIN_ZOOM = 13;
 
 export function HistoryHeatmap({
   points,
@@ -77,6 +83,13 @@ export function HistoryHeatmap({
         attributionControl: true,
       });
 
+      map.createPane('labelsPane');
+      const labelsPane = map.getPane('labelsPane');
+      if (labelsPane) {
+        labelsPane.style.zIndex = '450';
+        labelsPane.style.pointerEvents = 'none';
+      }
+
       const streetLayer = L.tileLayer(
         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
         {
@@ -90,10 +103,33 @@ export function HistoryHeatmap({
         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         {
           attribution:
-            'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+            'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
           maxZoom: 19,
         },
       );
+
+      // Google Maps–style names over satellite when zoomed in (roads + OSM labels).
+      const placesLabels = L.tileLayer(
+        'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',
+        {
+          pane: 'labelsPane',
+          subdomains: 'abcd',
+          opacity: 0.95,
+          maxZoom: 20,
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        },
+      );
+      const roadsLabels = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+        {
+          pane: 'labelsPane',
+          opacity: 0.7,
+          maxZoom: 19,
+          attribution: 'Roads &copy; Esri',
+        },
+      );
+      const labelsLayer = L.layerGroup();
 
       streetLayer.addTo(map);
 
@@ -114,10 +150,15 @@ export function HistoryHeatmap({
         selectedLayer,
         streetLayer,
         satelliteLayer,
+        labelsLayer,
+        placesLabels,
+        roadsLabels,
+        basemap: 'street',
       };
       handleRef.current = handle;
 
       const redraw = () => {
+        syncLabelOverlay(handle);
         paintMap(
           handle,
           pointsRef.current,
@@ -157,6 +198,7 @@ export function HistoryHeatmap({
   useEffect(() => {
     const handle = handleRef.current;
     if (!handle) return;
+    handle.basemap = basemap;
     if (basemap === 'satellite') {
       if (handle.map.hasLayer(handle.streetLayer)) {
         handle.map.removeLayer(handle.streetLayer);
@@ -172,6 +214,7 @@ export function HistoryHeatmap({
         handle.streetLayer.addTo(handle.map);
       }
     }
+    syncLabelOverlay(handle);
   }, [basemap]);
 
   useEffect(() => {
@@ -189,7 +232,7 @@ export function HistoryHeatmap({
   useEffect(() => {
     const handle = handleRef.current;
     if (!handle || !focusPoint) return;
-    handle.map.flyTo([focusPoint.lat, focusPoint.lng], 15, {
+    handle.map.flyTo([focusPoint.lat, focusPoint.lng], 16, {
       duration: 0.55,
     });
   }, [focusPoint?.id, focusPoint?.lat, focusPoint?.lng]);
@@ -207,6 +250,25 @@ export function HistoryHeatmap({
       aria-label="Interactive heatmap of your location history"
     />
   );
+}
+
+function syncLabelOverlay(handle: MapHandle) {
+  const { map, labelsLayer, placesLabels, roadsLabels, basemap } = handle;
+  const show =
+    basemap === 'satellite' && map.getZoom() >= LABEL_MIN_ZOOM;
+  if (show) {
+    if (!map.hasLayer(labelsLayer)) {
+      labelsLayer.addTo(map);
+    }
+    if (!labelsLayer.hasLayer(roadsLabels)) {
+      roadsLabels.addTo(labelsLayer);
+    }
+    if (!labelsLayer.hasLayer(placesLabels)) {
+      placesLabels.addTo(labelsLayer);
+    }
+  } else if (map.hasLayer(labelsLayer)) {
+    map.removeLayer(labelsLayer);
+  }
 }
 
 function paintMap(

@@ -68,15 +68,147 @@ export function parseNominatimLocation(
   };
 }
 
+export type PlaceSuggestion = {
+  name: string;
+  detail: string | null;
+  source: 'reverse' | 'nearby';
+  distanceM: number | null;
+};
+
+type NominatimPlace = {
+  name?: unknown;
+  display_name?: unknown;
+  class?: unknown;
+  type?: unknown;
+  distance?: unknown;
+  address?: Record<string, unknown>;
+};
+
+function locationIqBase(baseUrl?: string): string {
+  return (baseUrl ?? 'https://us1.locationiq.com/v1').replace(/\/+$/, '');
+}
+
+function pushUnique(out: PlaceSuggestion[], next: PlaceSuggestion) {
+  const key = next.name.trim().toLowerCase();
+  if (!key) return;
+  if (out.some((row) => row.name.trim().toLowerCase() === key)) return;
+  out.push(next);
+}
+
+function namedFromAddress(address: Record<string, unknown> | undefined): string[] {
+  if (!address) return [];
+  const keys = [
+    'amenity',
+    'shop',
+    'tourism',
+    'leisure',
+    'building',
+    'office',
+    'historic',
+    'man_made',
+    'natural',
+    'railway',
+    'aeroway',
+    'highway',
+  ] as const;
+  const names: string[] = [];
+  for (const key of keys) {
+    const value = text(address[key]);
+    if (value) names.push(value);
+  }
+  return names;
+}
+
+function streetLabel(address: Record<string, unknown> | undefined): string | null {
+  if (!address) return null;
+  const road = text(address.road);
+  if (!road) return null;
+  const number = text(address.house_number);
+  return number ? `${number} ${road}` : road;
+}
+
+function detailFromAddress(address: Record<string, unknown> | undefined): string | null {
+  if (!address) return null;
+  const parts = [
+    text(address.suburb) ?? text(address.neighbourhood) ?? text(address.quarter),
+    text(address.city) ??
+      text(address.town) ??
+      text(address.village) ??
+      text(address.municipality),
+    text(address.state),
+  ].filter(Boolean);
+  return parts.length ? parts.join(', ') : null;
+}
+
+function suggestionsFromReverse(payload: unknown): PlaceSuggestion[] {
+  const row = (payload && typeof payload === 'object' ? payload : null) as NominatimPlace | null;
+  if (!row) return [];
+  const address =
+    row.address && typeof row.address === 'object'
+      ? (row.address as Record<string, unknown>)
+      : undefined;
+  const out: PlaceSuggestion[] = [];
+  const named = text(row.name);
+  if (named) {
+    pushUnique(out, {
+      name: named,
+      detail: detailFromAddress(address),
+      source: 'reverse',
+      distanceM: null,
+    });
+  }
+  for (const value of namedFromAddress(address)) {
+    pushUnique(out, {
+      name: value,
+      detail: detailFromAddress(address),
+      source: 'reverse',
+      distanceM: null,
+    });
+  }
+  const street = streetLabel(address);
+  if (street) {
+    pushUnique(out, {
+      name: street,
+      detail: detailFromAddress(address),
+      source: 'reverse',
+      distanceM: null,
+    });
+  }
+  return out;
+}
+
+function suggestionsFromNearby(payload: unknown): PlaceSuggestion[] {
+  const rows = Array.isArray(payload) ? payload : [];
+  const out: PlaceSuggestion[] = [];
+  for (const item of rows) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as NominatimPlace;
+    const address =
+      row.address && typeof row.address === 'object'
+        ? (row.address as Record<string, unknown>)
+        : undefined;
+    const named =
+      text(row.name) ??
+      namedFromAddress(address)[0] ??
+      text(row.display_name)?.split(',')[0]?.trim() ??
+      null;
+    if (!named) continue;
+    const distanceRaw = Number(row.distance);
+    pushUnique(out, {
+      name: named,
+      detail: detailFromAddress(address),
+      source: 'nearby',
+      distanceM: Number.isFinite(distanceRaw) ? distanceRaw : null,
+    });
+  }
+  return out;
+}
+
 export async function reverseGeocodeCell(
   cell: GeoCell,
   opts: { apiKey: string; baseUrl?: string; fetcher?: typeof fetch },
 ): Promise<GeocodeLabel> {
-  const baseUrl = (opts.baseUrl ?? 'https://us1.locationiq.com/v1').replace(
-    /\/+$/,
-    '',
-  );
-  const url = new URL(`${baseUrl}/reverse`);
+  const url = new URL(`${locationIqBase(opts.baseUrl)}/reverse`);
   url.searchParams.set('lat', String(cell.latitude));
   url.searchParams.set('lon', String(cell.longitude));
   url.searchParams.set('format', 'json');
@@ -97,4 +229,69 @@ export async function reverseGeocodeCell(
     throw new Error(`Geocoding provider returned HTTP ${response.status}.`);
   }
   return parseNominatimLocation(await response.json(), 'locationiq');
+}
+
+/**
+ * Exact-coordinate place name suggestions for the user's "Name this place" flow.
+ * Not written to geo_cells (those stay at ~1.1 km cell precision).
+ */
+export async function suggestPlaceNames(
+  lat: number,
+  lng: number,
+  opts: { apiKey: string; baseUrl?: string; fetcher?: typeof fetch },
+): Promise<PlaceSuggestion[]> {
+  const base = locationIqBase(opts.baseUrl);
+  const fetcher = opts.fetcher ?? fetch;
+  const headers = { 'User-Agent': 'unwavering.band/1.0 (support@dataday.studio)' };
+
+  const reverseUrl = new URL(`${base}/reverse`);
+  reverseUrl.searchParams.set('lat', String(lat));
+  reverseUrl.searchParams.set('lon', String(lng));
+  reverseUrl.searchParams.set('format', 'json');
+  reverseUrl.searchParams.set('addressdetails', '1');
+  reverseUrl.searchParams.set('zoom', '18');
+  reverseUrl.searchParams.set('accept-language', 'en');
+  reverseUrl.searchParams.set('key', opts.apiKey);
+  reverseUrl.searchParams.set('normalizeaddress', '1');
+  reverseUrl.searchParams.set('namedetails', '1');
+
+  const nearbyUrl = new URL(`${base}/nearby`);
+  nearbyUrl.searchParams.set('lat', String(lat));
+  nearbyUrl.searchParams.set('lon', String(lng));
+  nearbyUrl.searchParams.set('tag', 'all');
+  nearbyUrl.searchParams.set('radius', '120');
+  nearbyUrl.searchParams.set('limit', '12');
+  nearbyUrl.searchParams.set('format', 'json');
+  nearbyUrl.searchParams.set('key', opts.apiKey);
+
+  const [reverseRes, nearbyRes] = await Promise.all([
+    fetcher(reverseUrl, {
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8_000),
+    }),
+    fetcher(nearbyUrl, {
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8_000),
+    }),
+  ]);
+
+  const out: PlaceSuggestion[] = [];
+  if (reverseRes.ok) {
+    for (const row of suggestionsFromReverse(await reverseRes.json())) {
+      pushUnique(out, row);
+    }
+  }
+  if (nearbyRes.ok) {
+    for (const row of suggestionsFromNearby(await nearbyRes.json())) {
+      pushUnique(out, row);
+    }
+  }
+  if (!reverseRes.ok && !nearbyRes.ok) {
+    throw new Error(
+      `Place lookup failed (reverse ${reverseRes.status}, nearby ${nearbyRes.status}).`,
+    );
+  }
+  return out.slice(0, 8);
 }

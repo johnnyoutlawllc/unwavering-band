@@ -1213,10 +1213,11 @@ select.input {
 
 .history-map-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.95fr);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
   gap: 1rem;
   align-items: stretch;
   margin-top: 0.25rem;
+  width: 100%;
 }
 
 .history-map-main {
@@ -1334,8 +1335,15 @@ select.input {
 
 .history-map-frame {
   position: relative;
-  height: min(520px, 70vh);
+  width: 100%;
+  height: min(72vh, 780px);
+  min-height: 420px;
   background: #0a0a12;
+}
+
+.history-map-frame-split {
+  height: min(46vh, 520px);
+  min-height: 280px;
 }
 
 .history-map-card-title-row {
@@ -1344,38 +1352,6 @@ select.input {
   align-items: center;
   justify-content: space-between;
   gap: 0.65rem 1rem;
-}
-
-.history-map-resize {
-  position: absolute;
-  z-index: 600;
-  right: 0.35rem;
-  bottom: 0.35rem;
-  width: 1.15rem;
-  height: 1.15rem;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  cursor: ns-resize;
-  background:
-    linear-gradient(
-      135deg,
-      transparent 0 42%,
-      rgba(244, 241, 234, 0.35) 42% 48%,
-      transparent 48% 58%,
-      rgba(244, 241, 234, 0.55) 58% 64%,
-      transparent 64% 74%,
-      rgba(244, 241, 234, 0.75) 74% 80%,
-      transparent 80%
-    ),
-    rgba(10, 10, 18, 0.55);
-  touch-action: none;
-}
-
-.history-map-resize:hover,
-.history-map-resize:focus-visible {
-  background-color: rgba(255, 179, 71, 0.25);
-  outline: 1px solid rgba(255, 179, 71, 0.45);
 }
 
 .history-leaflet-map {
@@ -1432,6 +1408,42 @@ select.input {
   font-size: 0.72rem;
   white-space: nowrap;
   pointer-events: none;
+}
+
+.history-name-suggestions {
+  margin: 0.85rem 0 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.history-name-suggestion-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.history-name-chip {
+  border: 1px solid rgba(244, 241, 234, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink, #f4f1ea);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.history-name-chip:hover,
+.history-name-chip:focus-visible {
+  border-color: rgba(255, 179, 71, 0.55);
+  background: rgba(255, 179, 71, 0.12);
+  outline: none;
+}
+
+.history-name-chip.is-active {
+  border-color: rgba(255, 179, 71, 0.7);
+  background: rgba(255, 179, 71, 0.2);
+  color: #fff;
 }
 
 .history-day-bars {

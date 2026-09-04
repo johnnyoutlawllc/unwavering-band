@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { DistanceChart } from '@/components/DistanceChart';
 import { HistoryHeatmap, type HistoryBasemap, type MapBounds } from '@/components/HistoryHeatmap';
 import { useAuth } from '@/lib/auth';
@@ -17,6 +17,10 @@ import {
   updatePlaceName,
   type HistoryMapPoint,
 } from '@/lib/history';
+import {
+  fetchPlaceSuggestions,
+  type PlaceSuggestion,
+} from '@/lib/place-suggest';
 import { listRelationships, PRIVACY_LABELS } from '@/lib/relationships';
 import {
   claimPendingKeyPackages,
@@ -34,13 +38,8 @@ const OVERLAY_KEY = 'ub_history_overlay_people';
 const COLORS_KEY = 'ub_history_person_colors';
 const MAP_MODE_KEY = 'ub_history_map_mode';
 const BASEMAP_KEY = 'ub_history_basemap';
-const MAP_HEIGHT_KEY = 'ub_history_map_height';
 
 type MapMode = 'shared' | 'split';
-
-const DEFAULT_MAP_HEIGHT = 520;
-const MIN_MAP_HEIGHT = 280;
-const MAX_MAP_HEIGHT = 900;
 
 function dayOf(iso: string): string {
   return iso.slice(0, 10);
@@ -165,7 +164,6 @@ export default function HistoryPage() {
   const [personColors, setPersonColors] = useState<Record<string, string>>({});
   const [mapMode, setMapMode] = useState<MapMode>('shared');
   const [basemap, setBasemap] = useState<HistoryBasemap>('street');
-  const [mapHeight, setMapHeight] = useState(DEFAULT_MAP_HEIGHT);
   const [peerNotes, setPeerNotes] = useState<string[]>([]);
   const [distanceByRel, setDistanceByRel] = useState<
     Record<string, DistancePoint[]>
@@ -184,6 +182,10 @@ export default function HistoryPage() {
   const [selected, setSelected] = useState<HistoryMapPoint | null>(null);
   const [naming, setNaming] = useState<NamingTarget | null>(null);
   const [placeName, setPlaceName] = useState('');
+  const [nameSuggestions, setNameSuggestions] = useState<PlaceSuggestion[]>(
+    [],
+  );
+  const [suggestStatus, setSuggestStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -284,12 +286,6 @@ export default function HistoryPage() {
     setMapMode(mode === 'split' ? 'split' : 'shared');
     const layer = readJson<HistoryBasemap>(BASEMAP_KEY, 'street');
     setBasemap(layer === 'satellite' ? 'satellite' : 'street');
-    const height = Number(localStorage.getItem(MAP_HEIGHT_KEY));
-    if (Number.isFinite(height)) {
-      setMapHeight(
-        Math.min(MAX_MAP_HEIGHT, Math.max(MIN_MAP_HEIGHT, Math.round(height))),
-      );
-    }
   }, []);
 
   useEffect(() => {
@@ -381,35 +377,6 @@ export default function HistoryPage() {
   function setBasemapPersist(layer: HistoryBasemap) {
     setBasemap(layer);
     localStorage.setItem(BASEMAP_KEY, JSON.stringify(layer));
-  }
-
-  function startMapResize(e: ReactPointerEvent<HTMLButtonElement>) {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = mapHeight;
-    const target = e.currentTarget;
-    target.setPointerCapture(e.pointerId);
-
-    function onMove(ev: PointerEvent) {
-      const next = Math.min(
-        MAX_MAP_HEIGHT,
-        Math.max(MIN_MAP_HEIGHT, Math.round(startHeight + (ev.clientY - startY))),
-      );
-      setMapHeight(next);
-    }
-
-    function onUp(ev: PointerEvent) {
-      target.releasePointerCapture(ev.pointerId);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      setMapHeight((current) => {
-        localStorage.setItem(MAP_HEIGHT_KEY, String(current));
-        return current;
-      });
-    }
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
   }
 
   const sorted = useMemo(
@@ -644,6 +611,8 @@ export default function HistoryPage() {
       }
       setNaming(null);
       setPlaceName('');
+      setNameSuggestions([]);
+      setSuggestStatus('');
       await reloadOwn();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save place.');
@@ -664,17 +633,56 @@ export default function HistoryPage() {
     setSelected(point);
   }
 
+  function namingCoords(target: NamingTarget): { lat: number; lng: number } {
+    return target.kind === 'place'
+      ? { lat: target.place.lat, lng: target.place.lng }
+      : { lat: target.point.lat, lng: target.point.lng };
+  }
+
+  async function loadNameSuggestions(target: NamingTarget) {
+    const { lat, lng } = namingCoords(target);
+    setSuggestStatus('Looking up nearby names…');
+    setNameSuggestions([]);
+    try {
+      const rows = await fetchPlaceSuggestions(lat, lng);
+      setNameSuggestions(rows);
+      setSuggestStatus(
+        rows.length
+          ? ''
+          : 'No nearby names found. Type your own.',
+      );
+    } catch {
+      setNameSuggestions([]);
+      setSuggestStatus('Could not look up nearby names.');
+    }
+  }
+
   function openNamePoint(point: HistoryMapPoint) {
     if (point.personId) return;
     setSelected(point);
     const existing = matchPlace(places, point.lat, point.lng);
-    if (existing) {
-      setNaming({ kind: 'place', place: existing });
-      setPlaceName(existing.name);
-    } else {
-      setNaming({ kind: 'point', point });
-      setPlaceName(point.semanticType ?? point.city ?? '');
-    }
+    const target: NamingTarget = existing
+      ? { kind: 'place', place: existing }
+      : { kind: 'point', point };
+    setNaming(target);
+    setPlaceName(
+      existing?.name ?? point.semanticType ?? point.city ?? '',
+    );
+    void loadNameSuggestions(target);
+  }
+
+  function openNamePlace(place: PlaceRow) {
+    const target: NamingTarget = { kind: 'place', place };
+    setNaming(target);
+    setPlaceName(place.name);
+    void loadNameSuggestions(target);
+  }
+
+  function closeNaming() {
+    setNaming(null);
+    setPlaceName('');
+    setNameSuggestions([]);
+    setSuggestStatus('');
   }
 
   function pickCity(label: string) {
@@ -1021,10 +1029,11 @@ export default function HistoryPage() {
                 </div>
                 <p>
                   Shared view. Click a location beside the map, or a city or
-                  state below, to zoom and filter. Drag the corner to resize.
+                  state below, to zoom and filter. Satellite view shows street
+                  and place names when zoomed in.
                 </p>
               </div>
-              <div className="history-map-frame" style={{ height: mapHeight }}>
+              <div className="history-map-frame">
                 {bounds ? (
                   <>
                     <HistoryHeatmap
@@ -1037,13 +1046,6 @@ export default function HistoryPage() {
                       onSelect={selectAndFocus}
                     />
                     <PointCard />
-                    <button
-                      type="button"
-                      className="history-map-resize"
-                      aria-label="Resize map"
-                      title="Drag to resize map"
-                      onPointerDown={startMapResize}
-                    />
                   </>
                 ) : (
                   <div className="history-map-empty">
@@ -1105,18 +1107,7 @@ export default function HistoryPage() {
                           current filters.
                         </p>
                       </div>
-                      <div
-                        className="history-map-frame history-map-frame-split"
-                        style={{
-                          height: Math.max(
-                            240,
-                            Math.round(
-                              mapHeight /
-                                Math.max(1, Math.min(mapSeries.length, 2)),
-                            ),
-                          ),
-                        }}
-                      >
+                      <div className="history-map-frame history-map-frame-split">
                         <HistoryHeatmap
                           points={series.points}
                           places={series.id === 'me' ? places : []}
@@ -1134,13 +1125,6 @@ export default function HistoryPage() {
                         {selected && personKey(selected) === series.id ? (
                           <PointCard />
                         ) : null}
-                        <button
-                          type="button"
-                          className="history-map-resize"
-                          aria-label="Resize map"
-                          title="Drag to resize map"
-                          onPointerDown={startMapResize}
-                        />
                       </div>
                     </section>
                   ))}
@@ -1371,10 +1355,7 @@ export default function HistoryPage() {
                   <button
                     type="button"
                     className="btn-quiet"
-                    onClick={() => {
-                      setNaming({ kind: 'place', place: p });
-                      setPlaceName(p.name);
-                    }}
+                    onClick={() => openNamePlace(p)}
                   >
                     Rename
                   </button>
@@ -1396,7 +1377,7 @@ export default function HistoryPage() {
       ) : null}
 
       {naming ? (
-        <div className="overlay" onClick={() => setNaming(null)}>
+        <div className="overlay" onClick={closeNaming}>
           <form
             className="modal"
             onClick={(e) => e.stopPropagation()}
@@ -1421,8 +1402,43 @@ export default function HistoryPage() {
                 autoFocus
               />
             </label>
+            {suggestStatus ? (
+              <p className="field-help">{suggestStatus}</p>
+            ) : null}
+            {nameSuggestions.length > 0 ? (
+              <div className="history-name-suggestions">
+                <span className="field-label">Suggested nearby</span>
+                <div className="history-name-suggestion-list">
+                  {nameSuggestions.map((row) => (
+                    <button
+                      key={`${row.source}:${row.name}`}
+                      type="button"
+                      className={
+                        placeName.trim().toLowerCase() ===
+                        row.name.trim().toLowerCase()
+                          ? 'history-name-chip is-active'
+                          : 'history-name-chip'
+                      }
+                      onClick={() => setPlaceName(row.name)}
+                      title={
+                        [
+                          row.detail,
+                          row.distanceM != null
+                            ? `${Math.round(row.distanceM)}m away`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || undefined
+                      }
+                    >
+                      {row.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="row">
-              <button type="button" className="btn" onClick={() => setNaming(null)}>
+              <button type="button" className="btn" onClick={closeNaming}>
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary" disabled={busy}>

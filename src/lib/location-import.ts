@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import type { ParsedSegment, ParseResult } from './location-history';
+import { sealCoords } from './crypto';
 
 const SEGMENT_CHUNK = 100;
 const POINT_CHUNK = 400;
@@ -24,13 +25,19 @@ type SegmentRow = {
   semantic_type: string | null;
   lat: number | null;
   lng: number | null;
+  lat_cipher: string | null;
+  lng_cipher: string | null;
   visit_probability: number | null;
   activity_type: string | null;
   distance_meters: number | null;
   start_lat: number | null;
   start_lng: number | null;
+  start_lat_cipher: string | null;
+  start_lng_cipher: string | null;
   end_lat: number | null;
   end_lng: number | null;
+  end_lat_cipher: string | null;
+  end_lng_cipher: string | null;
   activity_probability: number | null;
 };
 
@@ -38,11 +45,49 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
-function segmentRow(
+async function segmentRow(
   userId: string,
   importId: string,
   seg: ParsedSegment,
-): SegmentRow {
+  dek: CryptoKey | null,
+): Promise<SegmentRow> {
+  let lat: number | null = seg.lat;
+  let lng: number | null = seg.lng;
+  let lat_cipher: string | null = null;
+  let lng_cipher: string | null = null;
+  let start_lat: number | null = seg.startLat;
+  let start_lng: number | null = seg.startLng;
+  let start_lat_cipher: string | null = null;
+  let start_lng_cipher: string | null = null;
+  let end_lat: number | null = seg.endLat;
+  let end_lng: number | null = seg.endLng;
+  let end_lat_cipher: string | null = null;
+  let end_lng_cipher: string | null = null;
+
+  if (dek) {
+    if (lat != null && lng != null) {
+      const c = await sealCoords(dek, lat, lng);
+      lat_cipher = c.lat_cipher;
+      lng_cipher = c.lng_cipher;
+      lat = null;
+      lng = null;
+    }
+    if (start_lat != null && start_lng != null) {
+      const c = await sealCoords(dek, start_lat, start_lng);
+      start_lat_cipher = c.lat_cipher;
+      start_lng_cipher = c.lng_cipher;
+      start_lat = null;
+      start_lng = null;
+    }
+    if (end_lat != null && end_lng != null) {
+      const c = await sealCoords(dek, end_lat, end_lng);
+      end_lat_cipher = c.lat_cipher;
+      end_lng_cipher = c.lng_cipher;
+      end_lat = null;
+      end_lng = null;
+    }
+  }
+
   return {
     id: newId(),
     user_id: userId,
@@ -52,15 +97,21 @@ function segmentRow(
     end_time: seg.endTime,
     place_id: seg.placeId,
     semantic_type: seg.semanticType,
-    lat: seg.lat,
-    lng: seg.lng,
+    lat,
+    lng,
+    lat_cipher,
+    lng_cipher,
     visit_probability: seg.visitProbability,
     activity_type: seg.activityType,
     distance_meters: seg.distanceMeters,
-    start_lat: seg.startLat,
-    start_lng: seg.startLng,
-    end_lat: seg.endLat,
-    end_lng: seg.endLng,
+    start_lat,
+    start_lng,
+    start_lat_cipher,
+    start_lng_cipher,
+    end_lat,
+    end_lng,
+    end_lat_cipher,
+    end_lng_cipher,
     activity_probability: seg.activityProbability,
   };
 }
@@ -84,14 +135,15 @@ export async function uploadLocationHistory(opts: {
   filename: string;
   byteSize: number;
   parsed: ParseResult;
+  dek?: CryptoKey | null;
   onProgress?: (p: ImportProgress) => void;
 }): Promise<{ importId: string }> {
-  const { userId, filename, byteSize, parsed, onProgress } = opts;
+  const { userId, filename, byteSize, parsed, dek = null, onProgress } = opts;
   const report = (p: ImportProgress) => onProgress?.(p);
 
   report({
     phase: 'starting',
-    message: 'Starting import…',
+    message: dek ? 'Encrypting and starting import…' : 'Starting import…',
     segmentsDone: 0,
     segmentsTotal: parsed.segments.length,
     pointsDone: 0,
@@ -121,30 +173,40 @@ export async function uploadLocationHistory(opts: {
   const importId = imp.id as string;
 
   try {
-    const segmentRows = parsed.segments.map((s) => segmentRow(userId, importId, s));
-    const pointRows: Array<{
-      user_id: string;
-      import_id: string;
-      segment_id: string;
-      recorded_at: string;
-      offset_minutes: number;
-      lat: number;
-      lng: number;
-    }> = [];
+    const segmentRows: SegmentRow[] = [];
+    for (const s of parsed.segments) {
+      segmentRows.push(await segmentRow(userId, importId, s, dek));
+    }
+    const pointRows: Array<Record<string, unknown>> = [];
 
     for (let i = 0; i < parsed.segments.length; i++) {
       const seg = parsed.segments[i];
       const row = segmentRows[i];
       for (const pt of seg.pathPoints) {
-        pointRows.push({
-          user_id: userId,
-          import_id: importId,
-          segment_id: row.id,
-          recorded_at: pt.recordedAt,
-          offset_minutes: pt.offsetMinutes,
-          lat: pt.lat,
-          lng: pt.lng,
-        });
+        if (dek) {
+          const c = await sealCoords(dek, pt.lat, pt.lng);
+          pointRows.push({
+            user_id: userId,
+            import_id: importId,
+            segment_id: row.id,
+            recorded_at: pt.recordedAt,
+            offset_minutes: pt.offsetMinutes,
+            lat: null,
+            lng: null,
+            lat_cipher: c.lat_cipher,
+            lng_cipher: c.lng_cipher,
+          });
+        } else {
+          pointRows.push({
+            user_id: userId,
+            import_id: importId,
+            segment_id: row.id,
+            recorded_at: pt.recordedAt,
+            offset_minutes: pt.offsetMinutes,
+            lat: pt.lat,
+            lng: pt.lng,
+          });
+        }
       }
     }
 
@@ -184,7 +246,7 @@ export async function uploadLocationHistory(opts: {
 
       await insertChunks(
         'location_path_points',
-        pointRows as unknown as Record<string, unknown>[],
+        pointRows,
         POINT_CHUNK,
         (done) => {
         report({
@@ -216,7 +278,7 @@ export async function uploadLocationHistory(opts: {
 
     report({
       phase: 'done',
-      message: 'Import complete.',
+      message: dek ? 'Import complete (encrypted).' : 'Import complete.',
       segmentsDone: segmentRows.length,
       segmentsTotal: segmentRows.length,
       pointsDone: pointRows.length,

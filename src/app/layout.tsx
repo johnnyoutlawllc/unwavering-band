@@ -20,11 +20,11 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://unwavering.band'),
   title: 'unwavering.band',
   description:
-    'A person is a band of light. Sign in, share where you are, and be one of them.',
+    'A person is a band of light. Share history, form relationships, and watch distance over time.',
   openGraph: {
     title: 'unwavering.band',
     description:
-      'A person is a band of light. Sign in, share where you are, and be one of them.',
+      'A person is a band of light. Share history, form relationships, and watch distance over time.',
     url: 'https://unwavering.band',
     siteName: 'unwavering.band',
     type: 'website',

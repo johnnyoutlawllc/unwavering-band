@@ -2,17 +2,17 @@
 
 Read this first, then `OPEN-ISSUES.md`. `DECISIONS.md` records choices that
 look wrong but are deliberate. `GOOGLE-LOCATION-FORMAT.md` describes the upload
-file shape. `SCHEMA.md` is the data model for history imports. If this folder
-and the root `CLAUDE.md` disagree, **this folder wins**.
+file shape. `SCHEMA.md` is the data model. If this folder and the root
+`CLAUDE.md` disagree, **this folder wins**.
 
-Last updated 3 September 2026.
+Last updated 4 September 2026.
 
 ## What it is
 
-A live bandscape at https://unwavering.band. Visitors see every band present on
-the site, spaced by real geographic distance. Sharing a live location puts your
-band on the wall. The next act is a personal timeline built from Google Timeline
-exports, so distance between people over time has a data source.
+A site for the Vonnegut idea: a person is a vertical unwavering band of light.
+Visitors read the story on `/`. Signed-in people import timeline history, name
+places, form relationships with per-person privacy, and watch distance over
+time. The live bandscape (`/app/now`) remains as the "Now" view.
 
 ## Where things are
 
@@ -26,33 +26,54 @@ exports, so distance between people over time has a data source.
 | Stack | Next.js 16 + TypeScript, plain CSS (no Tailwind) |
 | Design | Black field, vertical bands of light, film grain. Not Design System v7. |
 
-Sample Google Timeline export (private, do not commit):
+## Surfaces
 
-`C:\AI Projects\Internal Files\Google Data\Brad Wheeler\location-history.json`
+| Path | Purpose |
+|---|---|
+| `/` | Story landing (Now / Later / Over time) |
+| `/signin` | Google + email/password |
+| `/app/history` | Personal visits + named places |
+| `/app/people` | Invite, accept, privacy tiers |
+| `/app/people/[id]` | Distance-over-time chart |
+| `/app/now` | Live bandscape presence |
+| `/app/settings` | Profile, live sharing, Timeline upload |
 
-A redacted three-record sample lives at `docs/samples/location-history.sample.json`.
+## Accounts with history
+
+| Email | Notes |
+|---|---|
+| `johnnyoutlawllc@gmail.com` | Google sign-in, Timeline imported |
+| `bigsky30media@gmail.com` | Google sign-in, Timeline imported |
+| `band-test-a@unwavering.local` | Email test, password `UnwaveringBand1!`, seeded visits |
+| `band-test-b@unwavering.local` | Email test, password `UnwaveringBand1!`, seeded visits |
 
 ## What works today
 
-- Google sign-in, profile row via trigger + upsert fallback
-- Live presence on Realtime channel `bands`
-- Settings: display name, band colour, live location sharing on/off
-- **Location history upload** (signed in only): parse Google Timeline JSON,
-  write `location_imports` + `location_segments` + `location_path_points`
-- Visit log on signed-in page load (`unwavering.visits`) — separate from
-  Google history segments
+- Story site + app shell
+- Google and email/password auth
+- **Client-side encryption** (vault passphrase); admins see ciphertext
+- Location history upload (encrypted when vault unlocked)
+- History browser + place naming
+- Relationships with privacy tiers + encrypted distance chart
+- Live presence on `/app/now`
+- Privacy Policy, Terms, Support, account deletion
+
+## Legal / store URLs
+
+- `/privacy` · `/terms` · `/support`
+- See `docs/APP-STORE.md` for App Store Connect checklist
 
 ## What is not built yet
 
-- Timeline visualization of imported history
-- Groups of bands / distance-over-time chart
-- Delete-my-history UI (tables support cascade delete by import)
-- Server-side import job for multi-MB files (current path is browser parse +
-  batched client inserts)
+- Sign in with Apple (needed before iOS if Google remains)
+- Native app + background tracking
+- Reverse-geocode city labels
+- Server-side import job for multi-MB files
+- Portable decrypted export UI
 
 ## How to continue
 
-1. Read `DECISIONS.md` and `GOOGLE-LOCATION-FORMAT.md`
-2. Apply any pending SQL under `supabase/` if the DB is behind the repo
-3. Upload path: Settings → "Your Timeline" → choose `location-history.json`
-4. Do not commit real location files. Keep samples synthetic.
+1. Read `DECISIONS.md` and `SCHEMA.md`
+2. Sign in as Johnny or Gracie (Google) to exercise real Timeline overlap
+3. Or use the `band-test-*` email pair for invite + chart smoke tests
+4. Do not commit real location files

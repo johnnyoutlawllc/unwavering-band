@@ -22,7 +22,7 @@ import {
  * put a band on the wall; it only fills the private history tables.
  */
 
-export const DEFAULT_BAND_COLOR = '#ffb066';
+import { DEFAULT_BAND_COLOR } from '@/lib/colors';
 
 const SWATCHES: Array<{ value: string | null; label: string }> = [
   { value: null, label: 'Orange and white, the default' },

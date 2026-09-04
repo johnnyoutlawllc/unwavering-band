@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { distanceLabel, haversineKm } from '@/lib/geo';
 import { Drone } from '@/lib/sound';
-import { DEFAULT_BAND_COLOR } from './SettingsModal';
+import { DEFAULT_BAND_COLOR } from '@/lib/colors';
 
 /*
  * The heart of the site. Every signed in person on the page right now is one

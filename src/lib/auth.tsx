@@ -12,22 +12,6 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { supabase, type UnwaveringUser } from './supabase';
 
-/*
- * Google is the only way in. There is no password to forget and no profile to
- * fill out, because the whole point of the thing is that being here is enough.
- *
- * The row in `unwavering.users` is normally created by a trigger on auth.users.
- * The trigger only fires on INSERT, though, so anyone who already had an
- * account on this Supabase project before this site existed arrives with no
- * row and has to be backfilled here.
- *
- * That backfill has to be an upsert, not an insert, and it has to be
- * single flight. Supabase fires getSession() and onAuthStateChange() at
- * roughly the same moment on a fresh sign in, so two loads race, both see no
- * row, and both try to create one. The loser used to surface a raw
- * "duplicate key value violates unique constraint" at the user.
- */
-
 type Ctx = {
   user: User | null;
   profile: UnwaveringUser | null;
@@ -36,9 +20,16 @@ type Ctx = {
   avatarUrl: string | null;
   error: string | null;
   signInWithGoogle: () => Promise<void>;
+  signInWithPassword: (email: string, password: string) => Promise<boolean>;
+  signUpWithPassword: (
+    email: string,
+    password: string,
+    displayName?: string,
+  ) => Promise<boolean>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   setProfile: (row: UnwaveringUser) => void;
+  clearError: () => void;
 };
 
 const AuthContext = createContext<Ctx | null>(null);
@@ -61,8 +52,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UnwaveringUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // One profile load at a time per user, so the two callers cannot race.
   const inFlight = useRef<Map<string, Promise<void>>>(new Map());
 
   const runLoad = useCallback(async (u: User) => {
@@ -82,9 +71,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // No row. Either the trigger has not landed yet or this account predates
-    // it. Upsert rather than insert: if the other caller got there first we
-    // want the existing row back, not a primary key violation.
     const meta = u.user_metadata ?? {};
     const { data: row, error: upsertErr } = await supabase
       .from('users')
@@ -109,8 +95,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Belt and braces. If the upsert still lost somehow, the row exists now,
-    // so read it back instead of shouting Postgres at somebody.
     const { data: reread } = await supabase
       .from('users')
       .select('*')
@@ -172,12 +156,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { error: err } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}${window.location.pathname}`,
+        redirectTo: `${window.location.origin}/app`,
         queryParams: { prompt: 'select_account' },
       },
     });
     if (err) setError(err.message);
   }, []);
+
+  const signInWithPassword = useCallback(async (email: string, password: string) => {
+    setError(null);
+    const { error: err } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    if (err) {
+      setError(err.message);
+      return false;
+    }
+    return true;
+  }, []);
+
+  const signUpWithPassword = useCallback(
+    async (email: string, password: string, displayName?: string) => {
+      setError(null);
+      const { data, error: err } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: displayName
+            ? { full_name: displayName, name: displayName }
+            : undefined,
+          emailRedirectTo: `${window.location.origin}/app`,
+        },
+      });
+      if (err) {
+        setError(err.message);
+        return false;
+      }
+      if (!data.session) {
+        setError(
+          'Check your email to confirm the account, then sign in. On this shared project, confirmation may be required.',
+        );
+        return false;
+      }
+      return true;
+    },
+    [],
+  );
 
   const signOut = useCallback(async () => {
     setError(null);
@@ -189,6 +214,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshProfile = useCallback(async () => {
     await loadProfile(user);
   }, [loadProfile, user]);
+
+  const clearError = useCallback(() => setError(null), []);
 
   const value = useMemo<Ctx>(
     () => ({
@@ -203,11 +230,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           : null),
       error,
       signInWithGoogle,
+      signInWithPassword,
+      signUpWithPassword,
       signOut,
       refreshProfile,
       setProfile,
+      clearError,
     }),
-    [user, profile, loading, error, signInWithGoogle, signOut, refreshProfile],
+    [
+      user,
+      profile,
+      loading,
+      error,
+      signInWithGoogle,
+      signInWithPassword,
+      signUpWithPassword,
+      signOut,
+      refreshProfile,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

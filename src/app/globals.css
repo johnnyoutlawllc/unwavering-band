@@ -181,6 +181,7 @@ button:disabled {
   color: var(--light);
   font-size: 0.92rem;
   letter-spacing: 0.01em;
+  text-decoration: none;
   transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
 
@@ -1798,6 +1799,64 @@ select.input {
 .visit-list li.is-selected {
   border-color: rgba(255, 179, 71, 0.55);
   background: rgba(255, 179, 71, 0.08);
+}
+
+.timeline-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  background: rgba(8, 8, 18, 0.45);
+}
+
+.timeline-status strong {
+  display: block;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 300;
+  font-size: 1.15rem;
+}
+
+.timeline-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+
+.timeline-filters {
+  margin: 0 0 1.25rem;
+}
+
+.timeline-day {
+  margin-top: 1.5rem;
+}
+
+.timeline-day h2 {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 300;
+  font-size: 1.05rem;
+  margin: 0 0 0.65rem;
+  color: var(--dim);
+}
+
+.timeline-badge {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+  border: 1px solid var(--hair);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+}
+
+.timeline-badge.live {
+  color: var(--band-3);
+  border-color: rgba(255, 179, 71, 0.45);
 }
 
 .leaflet-container {

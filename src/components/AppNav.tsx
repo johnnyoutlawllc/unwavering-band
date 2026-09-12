@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth';
 
 const LINKS = [
   { href: '/app/history', label: 'History' },
+  { href: '/app/timeline', label: 'Timeline' },
   { href: '/app/people', label: 'People' },
   { href: '/app/now', label: 'Now' },
   { href: '/app/settings', label: 'Settings' },

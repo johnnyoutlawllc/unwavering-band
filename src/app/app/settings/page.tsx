@@ -21,6 +21,7 @@ import {
   enableNativeBackgroundTracking,
   isNativeApp,
 } from '@/lib/native-bridge';
+import { recordLiveVisit } from '@/lib/timeline';
 
 const SWATCHES: Array<{ value: string | null; label: string }> = [
   { value: null, label: 'Orange and white, the default' },
@@ -140,6 +141,15 @@ export default function SettingsPage() {
         if (err) setError(err.message);
         else {
           setProfile(data as UnwaveringUser);
+          try {
+            await recordLiveVisit({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy_m: pos.coords.accuracy,
+            });
+          } catch {
+            // Profile opt-in still succeeded; Timeline can save another ping.
+          }
           if (isNativeApp()) {
             const native = await enableNativeBackgroundTracking();
             if (native.permission === 'denied') {
@@ -301,8 +311,10 @@ export default function SettingsPage() {
       <section className="subpanel">
         <h2>Your Timeline</h2>
         <p className="field-help">
-          Upload a Google Timeline export (`location-history.json`). Stored
-          encrypted with your vault key.
+          Live tracking pings and imported visits are listed on{' '}
+          <Link href="/app/timeline">My Timeline</Link>. Upload a Google
+          Timeline export (`location-history.json`) to add older records.
+          Stored encrypted with your vault key.
         </p>
         <input
           ref={fileRef}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/lib/auth';
 import { supabase, type UnwaveringUser } from '@/lib/supabase';
 import { getPosition } from '@/lib/geo';
@@ -28,6 +29,7 @@ import {
   enableNativeBackgroundTracking,
   isNativeApp,
 } from '@/lib/native-bridge';
+import { recordLiveVisit } from '@/lib/timeline';
 
 const SWATCHES: Array<{ value: string | null; label: string }> = [
   { value: null, label: 'Orange and white, the default' },
@@ -162,6 +164,15 @@ export function SettingsModal({
         if (err) setError(err.message);
         else {
           setProfile(data as UnwaveringUser);
+          try {
+            await recordLiveVisit({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy_m: pos.coords.accuracy,
+            });
+          } catch {
+            // Profile opt-in still succeeded; Timeline can save another ping.
+          }
           if (isNativeApp()) {
             const native = await enableNativeBackgroundTracking();
             if (native.permission === 'denied') {
@@ -297,8 +308,10 @@ export function SettingsModal({
         <div className="fieldset">
           <span className="field-label">Your Timeline</span>
           <p className="field-help">
-            Upload a Google Timeline export (location-history.json). It stays
-            private to your account and does not place a band on the wall.
+            See saved records on{' '}
+            <Link href="/app/timeline">My Timeline</Link>. Upload a Google
+            Timeline export (location-history.json) to add older visits. It
+            stays private to your account and does not place a band on the wall.
           </p>
           <input
             ref={fileRef}

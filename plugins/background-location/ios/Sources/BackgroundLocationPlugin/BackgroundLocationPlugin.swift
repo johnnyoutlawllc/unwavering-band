@@ -56,7 +56,7 @@ public class BackgroundLocationPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationMa
         call.resolve(["cleared": true])
     }
 
-    @objc func requestPermissions(_ call: CAPPluginCall) {
+    @objc public override func requestPermissions(_ call: CAPPluginCall) {
         let status = manager.authorizationStatus
         if status == .notDetermined {
             pendingPermissionCall = call

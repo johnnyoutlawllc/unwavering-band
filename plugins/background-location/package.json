@@ -1,0 +1,27 @@
+{
+  "name": "@unwavering/background-location",
+  "version": "0.1.0",
+  "description": "Always-on background location for Unwavering Band",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "android/src/main/",
+    "android/build.gradle",
+    "ios/Sources",
+    "Package.swift",
+    "index.js",
+    "index.d.ts"
+  ],
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  },
+  "private": true
+}

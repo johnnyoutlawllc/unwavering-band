@@ -1,7 +1,7 @@
 /*
- * Small geography helpers. The site never tracks anyone in the background:
- * every reading is one getCurrentPosition call, taken at a moment the person
- * chose by signing in with a button that says location is part of the deal.
+ * Geography helpers. The web site takes a foreground getCurrentPosition when
+ * the person opts in. Native apps also run Always background tracking via the
+ * Capacitor BackgroundLocation plugin (see docs/NATIVE.md).
  */
 
 export type Reading = {

@@ -12,3 +12,19 @@ npm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*
+
+# Native / Capacitor
+android/.gradle/
+android/app/build/
+android/build/
+android/keystore.properties
+android/local.properties
+*.jks
+*.keystore
+ios/App/Pods/
+ios/App/build/
+ios/DerivedData/
+ios/App/App/public/
+.capacitor/
+dist/*.apk
+dist/*.aab

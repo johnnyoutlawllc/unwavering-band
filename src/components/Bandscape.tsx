@@ -14,9 +14,9 @@ import { DEFAULT_BAND_COLOR } from '@/lib/colors';
  * how far away they really are: kilometres, log scaled so that across town
  * and across the ocean both fit on one screen.
  *
- * Presence rides Supabase Realtime. Nobody's coordinates touch a table for
- * this: each client announces name, colour and last reading into the channel,
- * and the channel is only readable by other signed in clients on the page.
+ * Presence rides Supabase Realtime while someone has the page open. Native
+ * apps also write last_lat/last_lng in the background; live_bands() merges
+ * those peers onto the wall when they are not in the channel.
  */
 
 type PresencePayload = {
@@ -86,7 +86,6 @@ export function Bandscape({
 }) {
   const { user, profile, displayName } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [others, setOthers] = useState<OtherBand[]>([]);
   const [soundOn, setSoundOn] = useState(false);
   const [volume, setVolume] = useState(1);
 
@@ -126,8 +125,10 @@ export function Bandscape({
   }, [user]);
 
   const presenceKey = user?.id ?? anonId;
+  const [presenceOthers, setPresenceOthers] = useState<OtherBand[]>([]);
+  const [dbOthers, setDbOthers] = useState<OtherBand[]>([]);
 
-  /* ---------- presence ---------- */
+  /* ---------- presence + last-known DB merge ---------- */
 
   useEffect(() => {
     if (!presenceKey) return;
@@ -150,7 +151,7 @@ export function Bandscape({
         });
       }
       list.sort((a, b) => a.key.localeCompare(b.key));
-      setOthers(list);
+      setPresenceOthers(list);
     });
 
     channel.subscribe(async (status) => {
@@ -170,6 +171,49 @@ export function Bandscape({
       supabase.removeChannel(channel);
     };
   }, [presenceKey, displayName, myColor, myLat, myLng]);
+
+  // Peers who are backgrounded still publish last_lat via the native app.
+  useEffect(() => {
+    if (!user) {
+      setDbOthers([]);
+      return;
+    }
+    let cancelled = false;
+
+    async function loadLive() {
+      const { data, error } = await supabase.rpc('live_bands');
+      if (cancelled || error || !data) return;
+      const list: OtherBand[] = (data as Array<{
+        id: string;
+        display_name: string | null;
+        band_color: string | null;
+        last_lat: number;
+        last_lng: number;
+      }>).map((row) => ({
+        key: row.id,
+        name: row.display_name?.split(/\s+/)[0] || 'someone',
+        color: row.band_color,
+        lat: row.last_lat,
+        lng: row.last_lng,
+      }));
+      setDbOthers(list);
+    }
+
+    void loadLive();
+    const id = window.setInterval(() => void loadLive(), 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [user]);
+
+  const others = useMemo(() => {
+    const map = new Map<string, OtherBand>();
+    for (const o of dbOthers) map.set(o.key, o);
+    // Live Realtime presence wins over last-known DB rows.
+    for (const o of presenceOthers) map.set(o.key, o);
+    return Array.from(map.values()).sort((a, b) => a.key.localeCompare(b.key));
+  }, [dbOthers, presenceOthers]);
 
   /* ---------- layout: geography to screen positions ---------- */
 

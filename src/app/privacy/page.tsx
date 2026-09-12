@@ -11,7 +11,7 @@ export default function PrivacyPage() {
   return (
     <>
       <Field />
-      <LegalShell title="Privacy Policy" updated="September 4, 2026">
+      <LegalShell title="Privacy Policy" updated="September 11, 2026">
         <p>
           This policy explains how unwavering.band (“we”, “us”) handles your
           information. The product is built so that precise location history is
@@ -137,12 +137,21 @@ export default function PrivacyPage() {
           <li>Export: you may download your Google Timeline from Google; we do not yet offer a portable export of decrypted history from this app.</li>
         </ul>
 
-        <h2>Future background tracking</h2>
+        <h2>Background location (native apps)</h2>
         <p>
-          If we ship a native app with persistent background location (similar
-          to Find My or Life360), we will request permission with a clear
-          purpose string, keep the same encryption model, and update this
-          policy before that feature goes live.
+          The iOS and Android apps can keep sharing your location while the app
+          is in the background, similar to Find My. This is opt-in: turn on
+          “Share where you are” in Settings and grant Always location
+          permission when the system asks. Turning sharing off stops background
+          tracking and clears your live coordinates.
+        </p>
+        <p>
+          While background sharing is on, the app periodically writes your
+          recent position into your account (visits and live last-known
+          coordinates) so people you share the Now canvas with can still see
+          your band. Google Timeline history you upload remains covered by the
+          vault encryption model above. You can revoke Always permission in
+          system Settings at any time.
         </p>
 
         <h2>Changes</h2>

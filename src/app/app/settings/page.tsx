@@ -16,6 +16,11 @@ import {
 } from '@/lib/location-import';
 import { supabase, type UnwaveringUser } from '@/lib/supabase';
 import { useVault } from '@/lib/vault';
+import {
+  disableNativeBackgroundTracking,
+  enableNativeBackgroundTracking,
+  isNativeApp,
+} from '@/lib/native-bridge';
 
 const SWATCHES: Array<{ value: string | null; label: string }> = [
   { value: null, label: 'Orange and white, the default' },
@@ -84,6 +89,7 @@ export default function SettingsPage() {
     setError(null);
     try {
       if (sharing) {
+        if (isNativeApp()) await disableNativeBackgroundTracking();
         const { data, error: err } = await supabase
           .from('users')
           .update({
@@ -110,7 +116,10 @@ export default function SettingsPage() {
           last_location_accuracy_m: pos.coords.accuracy,
           last_location_at: new Date().toISOString(),
         };
-        if (keys) {
+        // Native background tracking needs plaintext live coords on the users
+        // row so peers can see you while the app is closed. Vault still wraps
+        // Timeline history separately.
+        if (keys && !isNativeApp()) {
           const c = await sealCoords(keys.dek, pos.coords.latitude, pos.coords.longitude);
           patch.last_lat_cipher = c.lat_cipher;
           patch.last_lng_cipher = c.lng_cipher;
@@ -119,6 +128,8 @@ export default function SettingsPage() {
         } else {
           patch.last_lat = pos.coords.latitude;
           patch.last_lng = pos.coords.longitude;
+          patch.last_lat_cipher = null;
+          patch.last_lng_cipher = null;
         }
         const { data, error: err } = await supabase
           .from('users')
@@ -127,7 +138,21 @@ export default function SettingsPage() {
           .select()
           .single();
         if (err) setError(err.message);
-        else setProfile(data as UnwaveringUser);
+        else {
+          setProfile(data as UnwaveringUser);
+          if (isNativeApp()) {
+            const native = await enableNativeBackgroundTracking();
+            if (native.permission === 'denied') {
+              setError(
+                'Location permission was denied. Enable Always location for Unwavering Band in system Settings.',
+              );
+            } else if (native.permission === 'whenInUse') {
+              setError(
+                'Background sharing needs Always location. Open system Settings and set Location to Always.',
+              );
+            }
+          }
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read your location.');
@@ -253,8 +278,12 @@ export default function SettingsPage() {
           <div>
             <span className="field-label">Share where you are</span>
             <p className="field-help">
-              Live presence for the Now canvas. Turning it off clears live
-              coordinates.
+              Live presence for the Now canvas
+              {isNativeApp()
+                ? ', and Always-on background tracking while the app is closed.'
+                : '.'}{' '}
+              Turning it off clears live coordinates
+              {isNativeApp() ? ' and stops background tracking' : ''}.
             </p>
           </div>
           <button className="btn" onClick={toggleSharing} disabled={busy || importBusy}>

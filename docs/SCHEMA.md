@@ -6,6 +6,7 @@ Migrations:
 
 - `supabase/002_location_history.sql` — imports / segments / path points
 - `supabase/003_relationships_and_places.sql` — places, relationships, RPCs
+- `supabase/007_live_bands.sql` — `live_bands()` for backgrounded Now peers
 
 ## `users`
 
@@ -13,7 +14,7 @@ Profile + live location opt-in. Created by trigger on `auth.users`.
 
 ## `visits`
 
-One row per signed-in page load (not Google Timeline).
+One row per signed-in page load or native background fix (not Google Timeline).
 
 ## `location_imports` / `location_segments` / `location_path_points`
 
@@ -46,6 +47,7 @@ Unique pair index on `least/greatest` for active rows.
 | `list_my_relationships()` | Peer names without opening `users` to all |
 | `relationship_peer(id)` | Single peer view |
 | `relationship_distance_series(id, from?, to?)` | Daily miles + privacy-filtered peer coords |
+| `live_bands()` | Opted-in peers with recent plaintext last_lat/lng (Now canvas) |
 
 ## `relationship_daily_shares`
 

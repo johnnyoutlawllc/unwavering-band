@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Unwavering Band</string>
+    <string name="title_activity_main">Unwavering Band</string>
+    <string name="package_name">com.johnnyoutlaw.unwaveringband</string>
+    <string name="custom_url_scheme">com.johnnyoutlaw.unwaveringband</string>
+</resources>

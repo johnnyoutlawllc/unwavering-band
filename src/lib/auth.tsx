@@ -12,6 +12,11 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { supabase, type UnwaveringUser } from './supabase';
 import { clearVaultKeys } from './vault-store';
+import {
+  clearNativeAuthSession,
+  isNativeApp,
+  syncNativeAuthSession,
+} from './native-bridge';
 
 type Ctx = {
   user: User | null;
@@ -144,6 +149,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(u);
       await loadProfile(u);
       setLoading(false);
+      if (isNativeApp()) {
+        if (session) void syncNativeAuthSession();
+        else void clearNativeAuthSession();
+      }
     });
 
     return () => {
@@ -151,6 +160,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       sub.subscription.unsubscribe();
     };
   }, [loadProfile]);
+
+  useEffect(() => {
+    if (!isNativeApp() || !user) return;
+    void syncNativeAuthSession();
+  }, [user]);
 
   const signInWithGoogle = useCallback(async () => {
     setError(null);
@@ -208,6 +222,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     setError(null);
     const uid = user?.id;
+    if (isNativeApp()) await clearNativeAuthSession();
     const { error: err } = await supabase.auth.signOut();
     if (err) setError(err.message);
     else {

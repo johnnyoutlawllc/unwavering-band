@@ -23,6 +23,11 @@ import {
  */
 
 import { DEFAULT_BAND_COLOR } from '@/lib/colors';
+import {
+  disableNativeBackgroundTracking,
+  enableNativeBackgroundTracking,
+  isNativeApp,
+} from '@/lib/native-bridge';
 
 const SWATCHES: Array<{ value: string | null; label: string }> = [
   { value: null, label: 'Orange and white, the default' },
@@ -118,6 +123,7 @@ export function SettingsModal({
     setError(null);
     try {
       if (sharing) {
+        if (isNativeApp()) await disableNativeBackgroundTracking();
         const { data, error: err } = await supabase
           .from('users')
           .update({
@@ -125,6 +131,8 @@ export function SettingsModal({
             location_opted_out_at: new Date().toISOString(),
             last_lat: null,
             last_lng: null,
+            last_lat_cipher: null,
+            last_lng_cipher: null,
             last_location_accuracy_m: null,
             last_location_at: null,
           })
@@ -143,6 +151,8 @@ export function SettingsModal({
             location_opted_out_at: null,
             last_lat: pos.coords.latitude,
             last_lng: pos.coords.longitude,
+            last_lat_cipher: null,
+            last_lng_cipher: null,
             last_location_accuracy_m: pos.coords.accuracy,
             last_location_at: new Date().toISOString(),
           })
@@ -150,7 +160,21 @@ export function SettingsModal({
           .select()
           .single();
         if (err) setError(err.message);
-        else setProfile(data as UnwaveringUser);
+        else {
+          setProfile(data as UnwaveringUser);
+          if (isNativeApp()) {
+            const native = await enableNativeBackgroundTracking();
+            if (native.permission === 'denied') {
+              setError(
+                'Location permission was denied. Enable Always location for Unwavering Band in system Settings.',
+              );
+            } else if (native.permission === 'whenInUse') {
+              setError(
+                'Background sharing needs Always location. Open system Settings and set Location to Always.',
+              );
+            }
+          }
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read your location.');

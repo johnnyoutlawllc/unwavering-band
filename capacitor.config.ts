@@ -16,7 +16,7 @@ const config: CapacitorConfig = {
     allowNavigation: [
       'unwavering.band',
       'www.unwavering.band',
-      'auth.outlawapps.online',
+      'auth.dataday.studio',
       '*.supabase.co',
       'accounts.google.com',
       'appleid.apple.com',
